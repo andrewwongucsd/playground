@@ -8,6 +8,12 @@ A case study, not a codebase. This repo documents the architecture, the decision
 
 <br>
 
+<img src="docs/assets/game-table.svg" alt="The real-time game table — a five-card straight on the center pile, a pair selected in your hand, and three bot-filled opponent seats with chip counts" width="840">
+
+<sub><i>The real-time table — your fanned hand, the live center pile, and three bot-filled seats (UI illustration).</i></sub>
+
+<br>
+
 ![Go](https://img.shields.io/badge/Go-00ADD8?style=for-the-badge&logo=go&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
 ![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
@@ -20,20 +26,26 @@ A case study, not a codebase. This repo documents the architecture, the decision
 ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)
 ![Let's Encrypt](https://img.shields.io/badge/Let's_Encrypt-003A70?style=for-the-badge&logo=letsencrypt&logoColor=white)
 
+<br>
+
+**What it demonstrates** — designing, shipping, *and operating* a full-stack system on Kubernetes: infrastructure-as-code, least-privilege identities, scan-gated CI/CD, point-in-time backups, bounded autoscaling, a hardened public edge, and operations run through pipelines rather than a laptop.
+
 </div>
 
 ---
 
 ## The one-paragraph version
 
-Two small products — a real-time multiplayer card game and a browser-only developer-utilities toolbox — run on a **single always-free ARM node** in a managed Kubernetes cluster. Everything around them is production-grade and provisioned as code: a Terraform-built network and cluster, three least-privilege machine identities, a Trivy-gated CI/CD pipeline that cross-builds for ARM and blocks on real rollout success, ingress + auto-renewing TLS, an operator-run PostgreSQL with **continuous point-in-time backups**, and a full read-only diagnostics path for a cluster whose API server can't be reached directly. It's small on purpose — and operated like it isn't.
+Two small products — a real-time multiplayer card game and a browser-only developer-utilities toolbox — run on a **single always-free ARM node** in a managed Kubernetes cluster. Everything around them is production-grade and provisioned as code: a Terraform-built network and cluster, three least-privilege machine identities, a Trivy-gated CI/CD pipeline that cross-builds for ARM and blocks on real rollout success, ingress + auto-renewing TLS, an operator-run PostgreSQL with **continuous point-in-time backups**, horizontal autoscaling bounded by a scale-to-zero burst pool with a hard cost ceiling, and a full read-only diagnostics path for a cluster whose API server can't be reached directly. It's small on purpose — and operated like it isn't.
 
 ## Highlights
 
 - 🏗️ **100% infrastructure-as-code** — network, cluster, node pool, and every IAM identity in Terraform. Nothing clicked into a console.
 - 🔐 **Three least-privilege identities**, keys generated *in* Terraform and never typed by hand — the credential used most often holds the least power; the one living permanently in-cluster can touch the least.
 - 🛡️ **Scan-before-push CI/CD** — images are cross-built for ARM, scanned for critical/high CVEs *before* reaching the registry, then deployed with the pipeline blocking on the rollout actually succeeding.
+- 🧱 **A public edge hardened for the open internet** — per-IP connection caps and rate limits so one client can't exhaust the server, read/write deadlines and a ping/pong keepalive to reap dead sockets, and a data race the race detector caught (fixed by *injecting* the clock, not patching over it).
 - 🔄 **Point-in-time database recovery** — continuous WAL archiving to object storage, not just nightly snapshots. Restore to any moment, not the last backup.
+- 📈 **Elastic, but bounded** — the game server autoscales under load; overflow spills to a **scale-to-zero** burst node pool with a hard, documented cost ceiling (idle costs `$0`), and a graceful `SIGTERM` drain lets in-progress games finish before a pod is retired — elasticity that's safe for a stateful, in-memory game *and* can't run up an unbounded bill.
 - 🐛 **Four latent production bugs found and fixed** getting it live — several that *only* a real deployment would ever surface (see below).
 - 🔎 **Operated through pipelines, not a laptop** — the cluster API was unreachable directly for most of the build, so all ops run through CI, including a purpose-built read-only diagnostics workflow.
 
@@ -56,11 +68,16 @@ flowchart TD
     GSRV --> DB[("🐘 PostgreSQL<br/><sub>operator-run · block volume</sub>")]
     DB -.continuous WAL.-> OS["🪣 Object Storage<br/><sub>S3-compatible · PITR backups</sub>"]
 
+    HPA["📈 Autoscaler<br/><sub>game server 1 → 2 on load</sub>"] -.scales.-> GSRV
+    GSRV -.overflow spills to.-> BURST["🫧 Burst node pool<br/><sub>scale-to-zero · hard cost cap</sub>"]
+
     style LB fill:#326CE5,color:#fff
     style IN fill:#326CE5,color:#fff
     style CM fill:#003A70,color:#fff
     style DB fill:#4169E1,color:#fff
     style GSRV fill:#00ADD8,color:#fff
+    style HPA fill:#00ADD8,color:#fff
+    style BURST fill:#2E7D32,color:#fff
 ```
 
 The game's frontend and API share **one hostname** on purpose: the browser derives its WebSocket URL from the page origin, so one image runs on any hostname, the login cookie is first-party, and CORS never engages in production.
@@ -109,6 +126,15 @@ First-party manifests as Kustomize overlays; third-party add-ons (ingress, cert-
 </td><td>
 
 A `LoadBalancer` Service is one of the few Kubernetes objects that can quietly bill — its shape is pinned to the free-tier allowance (and flexible shapes bill on their *max*, so min and max are both pinned).
+
+</td></tr>
+<tr><td>
+
+**Autoscale, but cap the bill**
+
+</td><td>
+
+Horizontal pod autoscaling adds capacity under load; overflow spills to a scale-to-zero burst node pool whose hard `max` is the money cap — so idle costs nothing and a runaway workload can't spend past a known ceiling. And because the game holds state in memory, scale-down drains on `SIGTERM`, finishing hands rather than dropping them.
 
 </td></tr>
 </table>

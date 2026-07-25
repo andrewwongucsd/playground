@@ -32,11 +32,36 @@ gets scanned is exactly what ships. The first real run of this immediately
 earned its place by rejecting a base image with four fixable high-severity
 CVEs; the fix was a base-image bump the scan made unmissable.
 
+**Harden the public edge.** The WebSocket endpoint faces the open internet, so it's
+treated like it: per-IP caps on concurrent connections and a token-bucket rate limit
+(so a single IP can't exhaust the server's goroutines, memory, or the email quota),
+read/write deadlines plus a ping/pong keepalive that reaps a connection the client
+dropped without ever closing, and — surfaced *only* by running the whole test suite
+under the race detector — a real data race, fixed by making the clock an **injected
+dependency** rather than a package global, which had the second payoff of making the
+timeout logic unit-testable.
+
 **Keep the runbook in the repo.** Every infrastructure step — the real
 commands, the resources they produced, and *why* that approach is the
 industry-standard one rather than the minimal one — was written up as it
 happened, not narrated once in a chat and lost. A written record is the
 difference between "it worked once" and "anyone can do it again."
+
+**Elastic, but bounded — and safe for a stateful game.** The game server autoscales
+on load, but three deliberate constraints keep that from being reckless. First, *node*
+autoscaling — which could have provisioned billable capacity without limit, once a live
+check showed the account had far more quota than assumed and no physical guardrail — is
+confined to a **tainted, scale-to-zero burst node pool** with a hard `max` that is an
+explicit money cap: idle costs nothing, and the worst case is a documented ceiling in
+the low tens of dollars a month. Second, the replica count is owned by the autoscaler
+*alone*, not also hardcoded on the Deployment — the two fighting each other on every
+deploy is a real anti-pattern. Third, because game rooms are in-memory and pod-local,
+scaling *down* would otherwise drop live hands; the server drains on `SIGTERM` instead,
+finishing in-progress hands within a bounded window (under the pod's termination grace
+period) before it exits, so a hand is cut only if it outlasts that window — and even
+then it's a client reconnect, not lost data. The autoscaling thresholds themselves come
+from a WebSocket load test where each virtual user plays a full hand, not from a guess —
+untested autoscaling is an assumption, not a control.
 
 ## Bugs a real deployment surfaced
 

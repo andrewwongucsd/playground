@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 440" width="960" height="440" role="img" aria-label="Illustration of the multiplayer card-game table: your fanned hand at the bottom with a pair selected, a live five-card straight on the center pile, and three bot-filled opponent seats with chip counts.">
+  <title>The table — a five-card straight on the pile, your pair selected to play (UI illustration)</title>
+  <defs>
+    <linearGradient id="felt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#15754c"/>
+      <stop offset="1" stop-color="#0a3a29"/>
+    </linearGradient>
+    <linearGradient id="back" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3a7bd0"/>
+      <stop offset="1" stop-color="#1e4a86"/>
+    </linearGradient>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- table -->
+  <rect x="0" y="0" width="960" height="440" rx="22" fill="url(#felt)"/>
+  <rect x="16" y="16" width="928" height="408" rx="16" fill="none" stroke="#ffffff1f" stroke-width="2"/>
+  <ellipse cx="480" cy="196" rx="320" ry="150" fill="#ffffff0a"/>
+
+  <!-- ===== North seat ===== -->
+  <g transform="translate(414,34)" font-family="Segoe UI,Helvetica,Arial,sans-serif">
+    <g transform="translate(0,6) rotate(-8,21,30)"><rect width="42" height="60" rx="6" fill="url(#back)" stroke="#ffffff66" filter="url(#soft)"/><rect x="5" y="5" width="32" height="50" rx="4" fill="none" stroke="#ffffff55"/><circle cx="21" cy="30" r="7" fill="none" stroke="#ffffff66"/></g>
+    <g transform="translate(26,0)"><rect width="42" height="60" rx="6" fill="url(#back)" stroke="#ffffff66" filter="url(#soft)"/><rect x="5" y="5" width="32" height="50" rx="4" fill="none" stroke="#ffffff55"/><circle cx="21" cy="30" r="7" fill="none" stroke="#ffffff66"/></g>
+    <g transform="translate(52,0)"><rect width="42" height="60" rx="6" fill="url(#back)" stroke="#ffffff66" filter="url(#soft)"/><rect x="5" y="5" width="32" height="50" rx="4" fill="none" stroke="#ffffff55"/><circle cx="21" cy="30" r="7" fill="none" stroke="#ffffff66"/></g>
+    <g transform="translate(78,6) rotate(8,21,30)"><rect width="42" height="60" rx="6" fill="url(#back)" stroke="#ffffff66" filter="url(#soft)"/><rect x="5" y="5" width="32" height="50" rx="4" fill="none" stroke="#ffffff55"/><circle cx="21" cy="30" r="7" fill="none" stroke="#ffffff66"/></g>
+    <rect x="6" y="70" width="120" height="24" rx="12" fill="#00000059"/>
+    <text x="66" y="86" text-anchor="middle" font-size="13" fill="#fff">Ava · 11 cards</text>
+    <text x="66" y="108" text-anchor="middle" font-size="12" fill="#ffd54a">◈ 1,020</text>
+  </g>
+
+  <!-- ===== West seat ===== -->
+  <g transform="translate(58,180)" font-family="Segoe UI,Helvetica,Arial,sans-serif">
+    <g transform="translate(0,0) rotate(-6,21,30)"><rect width="42" height="60" rx="6" fill="url(#back)" stroke="#ffffff66" filter="url(#soft)"/><rect x="5" y="5" width="32" height="50" rx="4" fill="none" stroke="#ffffff55"/><circle cx="21" cy="30" r="7" fill="none" stroke="#ffffff66"/></g>
+    <g transform="translate(16,4)"><rect width="42" height="60" rx="6" fill="url(#back)" stroke="#ffffff66" filter="url(#soft)"/><rect x="5" y="5" width="32" height="50" rx="4" fill="none" stroke="#ffffff55"/><circle cx="21" cy="30" r="7" fill="none" stroke="#ffffff66"/></g>
+    <g transform="translate(32,8) rotate(6,21,30)"><rect width="42" height="60" rx="6" fill="url(#back)" stroke="#ffffff66" filter="url(#soft)"/><rect x="5" y="5" width="32" height="50" rx="4" fill="none" stroke="#ffffff55"/><circle cx="21" cy="30" r="7" fill="none" stroke="#ffffff66"/></g>
+    <rect x="-6" y="74" width="120" height="24" rx="12" fill="#00000059"/>
+    <text x="54" y="90" text-anchor="middle" font-size="13" fill="#fff">Bot-West · 9</text>
+    <text x="54" y="112" text-anchor="middle" font-size="12" fill="#ffd54a">◈ 980</text>
+  </g>
+
+  <!-- ===== East seat ===== -->
+  <g transform="translate(788,180)" font-family="Segoe UI,Helvetica,Arial,sans-serif">
+    <g transform="translate(0,8) rotate(-6,21,30)"><rect width="42" height="60" rx="6" fill="url(#back)" stroke="#ffffff66" filter="url(#soft)"/><rect x="5" y="5" width="32" height="50" rx="4" fill="none" stroke="#ffffff55"/><circle cx="21" cy="30" r="7" fill="none" stroke="#ffffff66"/></g>
+    <g transform="translate(16,4)"><rect width="42" height="60" rx="6" fill="url(#back)" stroke="#ffffff66" filter="url(#soft)"/><rect x="5" y="5" width="32" height="50" rx="4" fill="none" stroke="#ffffff55"/><circle cx="21" cy="30" r="7" fill="none" stroke="#ffffff66"/></g>
+    <g transform="translate(32,0) rotate(6,21,30)"><rect width="42" height="60" rx="6" fill="url(#back)" stroke="#ffffff66" filter="url(#soft)"/><rect x="5" y="5" width="32" height="50" rx="4" fill="none" stroke="#ffffff55"/><circle cx="21" cy="30" r="7" fill="none" stroke="#ffffff66"/></g>
+    <rect x="-8" y="74" width="126" height="24" rx="12" fill="#00000059"/>
+    <text x="55" y="90" text-anchor="middle" font-size="13" fill="#fff">Bot-East · 10</text>
+    <text x="55" y="112" text-anchor="middle" font-size="12" fill="#ffd54a">◈ 1,110</text>
+  </g>
+
+  <!-- ===== Center pile: a played five-card straight ===== -->
+  <g transform="translate(360,150)" font-family="Segoe UI,Helvetica,Arial,sans-serif">
+    <g transform="translate(0,10) rotate(-8,22,31)"><rect width="44" height="62" rx="6" fill="#fff" filter="url(#soft)"/><text x="7" y="18" font-size="15" font-weight="700" fill="#d0342c">4</text><text x="7" y="33" font-size="13" fill="#d0342c">♦</text><text x="22" y="45" font-size="20" text-anchor="middle" fill="#d0342c">♦</text></g>
+    <g transform="translate(30,4) rotate(-4,22,31)"><rect width="44" height="62" rx="6" fill="#fff" filter="url(#soft)"/><text x="7" y="18" font-size="15" font-weight="700" fill="#1a1a1a">5</text><text x="7" y="33" font-size="13" fill="#1a1a1a">♣</text><text x="22" y="45" font-size="20" text-anchor="middle" fill="#1a1a1a">♣</text></g>
+    <g transform="translate(60,0)"><rect width="44" height="62" rx="6" fill="#fff" filter="url(#soft)"/><text x="7" y="18" font-size="15" font-weight="700" fill="#d0342c">6</text><text x="7" y="33" font-size="13" fill="#d0342c">♥</text><text x="22" y="45" font-size="20" text-anchor="middle" fill="#d0342c">♥</text></g>
+    <g transform="translate(90,4) rotate(4,22,31)"><rect width="44" height="62" rx="6" fill="#fff" filter="url(#soft)"/><text x="7" y="18" font-size="15" font-weight="700" fill="#1a1a1a">7</text><text x="7" y="33" font-size="13" fill="#1a1a1a">♠</text><text x="22" y="45" font-size="20" text-anchor="middle" fill="#1a1a1a">♠</text></g>
+    <g transform="translate(120,10) rotate(8,22,31)"><rect width="44" height="62" rx="6" fill="#fff" filter="url(#soft)"/><text x="7" y="18" font-size="15" font-weight="700" fill="#d0342c">8</text><text x="7" y="33" font-size="13" fill="#d0342c">♦</text><text x="22" y="45" font-size="20" text-anchor="middle" fill="#d0342c">♦</text></g>
+    <rect x="34" y="74" width="100" height="22" rx="11" fill="#00000059"/>
+    <text x="84" y="89" text-anchor="middle" font-size="12" fill="#fff">Straight · Ava</text>
+  </g>
+
+  <!-- ===== Your hand (fanned, a pair raised & selected) ===== -->
+  <g transform="translate(0,300)" font-family="Segoe UI,Helvetica,Arial,sans-serif">
+    <g transform="translate(296,26) rotate(-16,22,62)"><rect width="44" height="62" rx="6" fill="#fff" filter="url(#soft)"/><text x="7" y="18" font-size="15" font-weight="700" fill="#1a1a1a">3</text><text x="7" y="33" font-size="13" fill="#1a1a1a">♣</text></g>
+    <g transform="translate(338,16) rotate(-12,22,62)"><rect width="44" height="62" rx="6" fill="#fff" filter="url(#soft)"/><text x="7" y="18" font-size="15" font-weight="700" fill="#d0342c">5</text><text x="7" y="33" font-size="13" fill="#d0342c">♦</text></g>
+    <g transform="translate(378,9) rotate(-8,22,62)"><rect width="44" height="62" rx="6" fill="#fff" filter="url(#soft)"/><text x="7" y="18" font-size="15" font-weight="700" fill="#d0342c">6</text><text x="7" y="33" font-size="13" fill="#d0342c">♦</text></g>
+    <g transform="translate(416,4) rotate(-4,22,62)"><rect width="44" height="62" rx="6" fill="#fff" filter="url(#soft)"/><text x="7" y="18" font-size="15" font-weight="700" fill="#1a1a1a">8</text><text x="7" y="33" font-size="13" fill="#1a1a1a">♠</text></g>
+    <g transform="translate(456,-14)"><rect width="44" height="62" rx="6" fill="#fff" stroke="#ffcf3f" stroke-width="3" filter="url(#soft)"/><text x="7" y="18" font-size="15" font-weight="700" fill="#d0342c">Q</text><text x="7" y="33" font-size="13" fill="#d0342c">♥</text><text x="22" y="47" font-size="20" text-anchor="middle" fill="#d0342c">♥</text></g>
+    <g transform="translate(500,-14)"><rect width="44" height="62" rx="6" fill="#fff" stroke="#ffcf3f" stroke-width="3" filter="url(#soft)"/><text x="7" y="18" font-size="15" font-weight="700" fill="#1a1a1a">Q</text><text x="7" y="33" font-size="13" fill="#1a1a1a">♠</text><text x="22" y="47" font-size="20" text-anchor="middle" fill="#1a1a1a">♠</text></g>
+    <g transform="translate(544,4) rotate(4,22,62)"><rect width="44" height="62" rx="6" fill="#fff" filter="url(#soft)"/><text x="7" y="18" font-size="15" font-weight="700" fill="#d0342c">K</text><text x="7" y="33" font-size="13" fill="#d0342c">♦</text></g>
+    <g transform="translate(582,9) rotate(8,22,62)"><rect width="44" height="62" rx="6" fill="#fff" filter="url(#soft)"/><text x="7" y="18" font-size="15" font-weight="700" fill="#1a1a1a">A</text><text x="7" y="33" font-size="13" fill="#1a1a1a">♣</text></g>
+    <g transform="translate(622,16) rotate(12,22,62)"><rect width="44" height="62" rx="6" fill="#fff" filter="url(#soft)"/><text x="7" y="18" font-size="15" font-weight="700" fill="#1a1a1a">2</text><text x="7" y="33" font-size="13" fill="#1a1a1a">♠</text></g>
+  </g>
+
+  <!-- ===== chrome ===== -->
+  <g font-family="Segoe UI,Helvetica,Arial,sans-serif">
+    <rect x="34" y="392" width="150" height="30" rx="15" fill="#00000073"/>
+    <circle cx="52" cy="407" r="8" fill="#3a7bd0"/>
+    <text x="68" y="412" font-size="13" fill="#fff">You · ◈ 1,240</text>
+    <rect x="404" y="398" width="152" height="30" rx="15" fill="#ffcf3f"/>
+    <text x="480" y="418" text-anchor="middle" font-size="13" font-weight="700" fill="#3a2c00">✦ YOUR TURN</text>
+    <rect x="656" y="392" width="104" height="30" rx="15" fill="#ffcf3f"/>
+    <text x="708" y="412" text-anchor="middle" font-size="13" font-weight="700" fill="#3a2c00">Play pair</text>
+    <rect x="768" y="392" width="80" height="30" rx="15" fill="#ffffff26" stroke="#ffffff55"/>
+    <text x="808" y="412" text-anchor="middle" font-size="13" fill="#fff">Pass</text>
+  </g>
+</svg>

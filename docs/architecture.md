@@ -96,6 +96,52 @@ window: a snapshot lets you restore to the instant it was taken; continuous
 WAL archiving lets you restore to *any moment* between base backups. That is
 the difference between losing a day and losing a few minutes.
 
+## Scaling, safely and within budget
+
+Elasticity happens at three levels, and conflating them is the classic mistake:
+
+```
+  Pod    -- a HorizontalPodAutoscaler raises the game server 1 -> 2 on load
+  Node   -- a fixed baseline node runs everything stateful (DB, server, ingress)
+  Node   -- a scale-to-zero BURST pool absorbs overflow the baseline can't hold
+```
+
+The load-bearing insight: **an autoscaler for pods cannot create capacity.** If it
+scales the game server to two pods but the second doesn't fit on the one baseline
+node, that pod just sits `Pending`. Only *node* autoscaling adds real capacity — so
+both layers exist, and the node layer is bounded hard.
+
+**Bounded, because the guardrail assumption broke.** Node autoscaling was originally
+scoped out on the theory that a fixed node pool was a *physical* ceiling. A live check
+showed the account had far more quota than a pure free-tier one and no physical
+guardrail at all — autoscaling would have provisioned billable nodes with nothing to
+stop it. The fix wasn't "never autoscale," it was **autoscale with a hard, documented
+ceiling**: a second node pool that is *tainted* (only opt-in workloads land on it),
+**scales to zero** (so idle costs nothing), and is capped at a small `max` that is the
+money limit — a worst case in the low tens of dollars a month, and `$0` at rest. The
+autoscaler physically cannot exceed that node count no matter what a runaway workload
+requests.
+
+**The two autoscalers hand off through the scheduler, not directly.** The pod
+autoscaler adds a replica; the scheduler prefers the always-present baseline node and
+only fails to place it if the baseline is full; a replica that doesn't fit goes
+`Pending`; because the game server *tolerates* the burst pool's taint — but carries no
+node-selector pinning it there — the scheduler sees it could fit a burst node, and the
+node autoscaler adds one. The toleration *is* the handoff; the absence of a
+node-selector is what keeps the server on the free baseline until it genuinely
+overflows.
+
+**Elasticity that's safe for a stateful game.** Game rooms are in-memory and
+pod-local, so retiring a pod abruptly would drop every hand on it — and Kubernetes
+sends `SIGTERM` before killing a pod on *every* scale-down, node drain, and rollout.
+So the server drains: on `SIGTERM` it stops accepting new connections, forms no new
+rooms, and gives the hands already under way a bounded window (kept under the pod's
+termination grace period) to finish before it exits. A live hand is cut only if it
+outlasts that window — and even then it's a client reconnect, not lost data, because
+the wallet and history live in the database. None of the autoscaling targets are
+guesses, either: a WebSocket load test where each virtual user plays a full hand is
+what right-sizes them.
+
 ## Operating a cluster you can't reach directly
 
 For most of this build, direct `kubectl` access to the cluster's API endpoint
