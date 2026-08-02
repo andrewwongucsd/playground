@@ -147,20 +147,22 @@ There are no passwords in this system. Not hashed ones — none. Two different d
 lead to the same session cookie, and neither involves the user choosing a secret.
 
 ```
-   DOOR 1 -- one-time link                DOOR 2 -- signed mini-app payload
-   -----------------------                --------------------------------
-   ask for a link                         open the game inside the chat app
-        |                                      |
-        v                                      v
-   server mints a token with a            the platform signs a payload with
-   CRYPTO-grade random source             a secret only it and the server know
-        |                                      |
-        v                                      v
-   one transaction:                       verify the signature in constant time,
-     consume the token AND                 reject anything older than the
-     create-or-find the account            freshness window (no replay)
-        |                                      |
-        +------------------+-------------------+
+   DOOR 1 -- chat-platform signature       DOOR 2 -- admin one-time link
+   ---------------------------------       -----------------------------
+   open the mini-app inside the chat        an allow-listed admin asks the
+   app, or press "log in with" on the       bot for a login link
+   web                                           |
+        |                                        v
+        v                                   server mints a one-time token with
+   the platform signs a payload with        a CRYPTO-grade random source; the
+   a secret only it and the server know     bot delivers the link directly
+        |                                        |
+        v                                        v
+   verify the signature in constant        open the link (a plain navigation):
+   time, reject anything older than         ONE transaction consumes the token
+   the freshness window (no replay)         (single-use) AND resolves its account
+        |                                        |
+        +------------------+---------------------+
                            v
               ONE helper sets ONE session cookie
               HttpOnly · Secure · SameSite=Lax
@@ -171,18 +173,24 @@ lead to the same session cookie, and neither involves the user choosing a secret
               protocol never had to learn about auth at all
 ```
 
-Three details carry most of the value. The token uses a cryptographic random source,
-not the same generator that shuffles the cards — if guessing it lets someone in, it
-gets `crypto/rand`; if guessing it only spoils a game, the fast one is fine. Consuming
-the token and creating the account happen in **one transaction**, because a crash
-between them would mark a link used while creating no account: a login that silently
-does nothing, forever. And both doors call the *same* cookie helper, so the security
+Three details carry most of the value. The one-time token uses a cryptographic random
+source, not the same generator that shuffles the cards — if guessing it lets someone in,
+it gets `crypto/rand`; if guessing it only spoils a game, the fast one is fine.
+Consuming the token and resolving its account happen in **one transaction**, because a
+crash between them would mark a link used while handing back no session: a login that
+silently does nothing. And both doors call the *same* cookie helper, so the security
 flags can never drift apart between them.
 
-In production only the second door is open. Turning it on doesn't merely hide the
-email form — it **unregisters those routes entirely**, because a route left registered
-still accepts a direct POST and would still write an unverified email address into the
-database.
+The one-time link travels over the bot, which surfaced a subtle failure worth naming:
+the chat platform fetches any URL in a message server-side to build a preview card, and
+that `GET` consumed the single-use token before the recipient could — so the delivery
+disables the link preview. A single-use side effect behind a bare `GET` fires for the
+first thing that fetches it, and a human is rarely first.
+
+The email door this system launched with is simply **gone** — not hidden behind a flag
+but removed, its request route deleted outright. A route left registered still accepts a
+direct POST and would still write an unverified address into the database, so retiring
+the feature meant retiring the endpoint, not just the form.
 
 > **Say it in one line:** retire the endpoint, not just the UI — a hidden form is
 > still an open door.
