@@ -85,9 +85,10 @@ security flags can't drift apart. The token uses a cryptographic random source w
 the card shuffle uses the fast one: if guessing it lets someone in, it gets the slow
 generator. Consuming the token and creating the account happen in one transaction,
 because a crash between them would leave a link marked used with no account behind it.
-Consuming a link also *lands* you somewhere: it redirects into the app rather than
-rendering a "you're logged in" page: that page told you to return to the tab that
-asked for the link, which stopped being true the day links started arriving as a DM.
+Where a consumed link *lands* is the one loose end: it still renders a "you're logged
+in" page telling you to return to the tab that asked — which stopped being true the
+day links started arriving as a DM. The redirect that fixes it is written but not
+merged, so it is listed under what isn't proven rather than claimed here.
 
 **Sign the state you hand to a client, and fail closed when you can't check it.**
 Two places needed a secret that isn't a session. A matchmaking key is proved on one
@@ -309,6 +310,12 @@ Stating this is part of the engineering, not an apology for it.
 - **CPU is the wrong signal, knowingly.** Long-lived idle WebSocket connections barely
   move CPU, so it is a weak proxy for real load. The better signal is active rooms per
   pod, and the upgrade to it is staged in the file rather than pretended away.
+- **A login link still lands on a dead-end page.** The one-time link sets the session
+  correctly, then renders "you're logged in — close this tab and go back," advice that
+  stopped being true when links began arriving as a bot DM rather than in a tab the
+  user already had open. The redirect that fixes it is authored and sitting on a
+  branch, unmerged. Nothing is broken about the *auth*; the last screen just lies about
+  what to do next, which is its own kind of bug.
 - **The game client has no automated tests.** The pure client-side libraries in the
   other product are unit-tested, and the server's real-socket test verifies the wire
   protocol from the Go side. The browser client is verified by hand. That's a real gap,

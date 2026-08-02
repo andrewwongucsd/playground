@@ -180,12 +180,16 @@ between them would mark a link used while creating no account: a login that sile
 does nothing, forever. And both doors call the *same* cookie helper, so the security
 flags can never drift apart between them.
 
-A fourth detail is about what a link *ends* at. Consuming one used to render a plain
-"you're logged in" page telling you to close the tab and go back to the one that
-asked — which made sense only while a waiting tab existed. Once links started arriving
-as a bot DM, that page was instructing people to return somewhere they had never
-been. Now the same response that sets the cookie also redirects into the app, so the
-tab you opened is the tab you play in.
+A fourth detail is about what a link *ends* at, and it is the one thing on this page
+that is still wrong in production. Consuming a link renders a plain "you're logged
+in" page telling you to close the tab and go back to the one that asked — which made
+sense only while a waiting tab existed. Once links started arriving as a bot DM, that
+page began instructing people to return somewhere they had never been. The fix (the
+same response that sets the cookie also redirects into the app) is written and sitting
+on a branch; it is **not merged**, so the dead-end page is what a real user still
+hits. It is listed here rather than described as done, because a flow whose last step
+lies to the user is exactly the kind of thing a portfolio is tempted to quietly fix in
+prose first.
 
 The email door was retired along the way, and *how* is the point. It wasn't put behind
 a feature flag — the endpoint was **deleted**. A flag would have left "is this route
