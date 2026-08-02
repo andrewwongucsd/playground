@@ -78,13 +78,15 @@ doing so it re-implements your assumptions, so it agrees with the bug. The real 
 doesn't. Optional real dependencies **skip rather than fail**, so "no setup needed
 locally" and "actually tested in CI" are both true at once.
 
-**No passwords anywhere — two doors, one cookie.** Login is a one-time link or a signed
-mini-app payload from a chat platform. Nothing to hash, rate-limit, or leak, because
-there is no password to steal. Both paths converge on a single cookie helper, so the
-security flags can't drift apart. The token uses a cryptographic random source while
-the card shuffle uses the fast one: if guessing it lets someone in, it gets the slow
-generator. Consuming the token and creating the account happen in one transaction,
-because a crash between them would leave a link marked used with no account behind it.
+**No passwords anywhere — two doors, one cookie.** Login is a chat-platform sign-in — a
+mini-app payload signed inside the app, or a "log in with" button on the web, both
+proved by recomputing a signature in constant time — or an admin-issued one-time link
+the bot delivers directly. Nothing to hash, rate-limit, or leak, because there is no
+password to steal. Both doors converge on a single cookie helper, so the security flags
+can't drift apart. The one-time token uses a cryptographic random source while the card
+shuffle uses the fast one: if guessing it lets someone in, it gets the slow generator.
+Consuming that token and resolving its account happen in one transaction, because a
+crash between them would leave a link marked used with no session behind it.
 
 **Sign the state you hand to a client, and fail closed when you can't check it.**
 Two places needed a secret that isn't a session. A matchmaking key is proved on one
@@ -141,6 +143,17 @@ forwarded-protocol header, which is safe to trust *here* specifically because th
 failure runs in the harmless direction: a spoofed value can only *add* the flag, never
 remove it. In production a proxy sits in front of you — read what it forwarded, not
 what your process saw.
+
+**A link-preview crawler spent every login link before its owner clicked.** The bot
+DMs a one-time login link; the link is a bare `GET` whose entire job is to consume the
+token on first hit. But a chat platform, like a mail client or a messaging app, fetches
+any URL in a message *server-side* to render the little preview card — and that fetch is
+a `GET`. So the platform's crawler hit the verify URL, consumed the single-use token,
+and every link reached its recipient already spent — with nothing in the logs looking
+wrong, because the token really was consumed exactly once, just not by a human. The fix
+is one flag that suppresses the preview fetch. The general lesson outlives the platform:
+a single-use side effect behind a bare `GET` fires for the first thing that fetches it,
+and plenty of things fetch links before a person ever does.
 
 **A workflow reported success while doing nothing.** After adding a manual-dispatch
 trigger, the publish-and-deploy jobs still gated on the event being a push. A manual run

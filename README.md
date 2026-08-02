@@ -157,7 +157,7 @@ A portfolio that only lists wins is a portfolio you can't trust. This is the rea
 
 Two product details worth their own line, because both were judgement calls rather than features:
 
-- **No passwords anywhere.** Two doors — a one-time magic link and a signed chat-platform mini-app payload — converge on one session cookie set in exactly one place. Nothing to hash, rate-limit, or leak, because there is no password.
+- **No passwords anywhere.** Two doors — a chat-platform sign-in (a mini-app payload signed inside the app, or a "log in with" button on the web) and an admin-issued one-time link delivered over the bot — converge on one session cookie set in exactly one place. Nothing to hash, rate-limit, or leak, because there is no password.
 - **The interface speaks the player's language.** A second locale in the game's *colloquial* register, auto-selected from the device's own signals with a manual override — and the dealer reads each play aloud through the browser's speech synthesis, with no audio files and no network call.
 - **You play with the people you came with.** Launched from a group conversation, the game seats that chat together — but the key is a *preference*, not a partition: unfilled tables merge with each other after a few seconds, and only then is filling the empty seats with bots offered. Never seating anyone is worse than seating them with strangers.
 
