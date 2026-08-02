@@ -149,7 +149,8 @@ lead to the same session cookie, and neither involves the user choosing a secret
 ```
    DOOR 1 -- one-time link                DOOR 2 -- signed mini-app payload
    -----------------------                --------------------------------
-   ask for a link                         open the game inside the chat app
+   an allow-listed operator DMs           open the game inside the chat app
+   the bot and gets a link back                |
         |                                      |
         v                                      v
    server mints a token with a            the platform signs a payload with
@@ -179,13 +180,24 @@ between them would mark a link used while creating no account: a login that sile
 does nothing, forever. And both doors call the *same* cookie helper, so the security
 flags can never drift apart between them.
 
-In production only the second door is open. Turning it on doesn't merely hide the
-email form — it **unregisters those routes entirely**, because a route left registered
-still accepts a direct POST and would still write an unverified email address into the
-database.
+A fourth detail is about what a link *ends* at. Consuming one used to render a plain
+"you're logged in" page telling you to close the tab and go back to the one that
+asked — which made sense only while a waiting tab existed. Once links started arriving
+as a bot DM, that page was instructing people to return somewhere they had never
+been. Now the same response that sets the cookie also redirects into the app, so the
+tab you opened is the tab you play in.
 
-> **Say it in one line:** retire the endpoint, not just the UI — a hidden form is
-> still an open door.
+The email door was retired along the way, and *how* is the point. It wasn't put behind
+a feature flag — the endpoint was **deleted**. A flag would have left "is this route
+live?" answerable only per-deployment, when the honest answer was "never again":
+hiding a form stops honest users, but a direct POST would still have written an
+unverified email address into the database. Its sibling — the endpoint that turns a
+token into a session — went the other way and is now registered *unconditionally*,
+because it is where both surviving doors finish. Two routes that once lived and died
+together now have opposite lifetimes, because only one still has a job.
+
+> **Say it in one line:** retire the endpoint, not just the UI — and when a flow
+> changes shape, check that the page it ends on still tells the truth.
 
 ## Playing with the people you came with
 

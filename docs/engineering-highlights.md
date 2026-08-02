@@ -85,6 +85,9 @@ security flags can't drift apart. The token uses a cryptographic random source w
 the card shuffle uses the fast one: if guessing it lets someone in, it gets the slow
 generator. Consuming the token and creating the account happen in one transaction,
 because a crash between them would leave a link marked used with no account behind it.
+Consuming a link also *lands* you somewhere: it redirects into the app rather than
+rendering a "you're logged in" page: that page told you to return to the tab that
+asked for the link, which stopped being true the day links started arriving as a DM.
 
 **Sign the state you hand to a client, and fail closed when you can't check it.**
 Two places needed a secret that isn't a session. A matchmaking key is proved on one
