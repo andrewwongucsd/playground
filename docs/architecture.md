@@ -1913,8 +1913,25 @@ It is **authored, schema-validated, and deliberately not switched on**: a canary
 a second pod the one baseline node can't hold — the same capacity gate the
 observability and autoscaling work both ran into.
 
+**And the blocker is smaller than it looks, which is worth saying rather than
+leaving "staged" to sound like "stuck".** The GitOps overlay is the production
+overlay plus a Rollout, an analysis template, and one autoscaler patch — and every
+one of those is a *progressive-delivery* object, not a GitOps one. The GitOps
+controller is only the thing that applies them. So the existing pipeline could
+apply that overlay directly and get the canary with **one** controller instead of
+five, changing no manifest at all.
+
+That splits a problem that looked singular. The real constraint was never the
+GitOps controller's footprint; it is that a canary needs a second application pod
+this node cannot schedule. Running progressive delivery on its own doesn't remove
+that constraint — it reduces the question from "can this node hold four platform
+pods *and* a second app pod?" to "can it hold one more app pod?", which is the
+cheaper question and the one worth answering first. Git-as-source-of-truth is a
+genuinely separate win, and it is the half that needs the four pods.
+
 > **Say it in one line:** GitOps is a source-of-truth move, and a canary is only as
-> honest as its query — so handle no-data, and know what your indicator can't see.
+> honest as its query — so handle no-data, know what your indicator can't see, and
+> when something is blocked on capacity, check which *half* of it is blocked.
 
 ## Hardening: the supply chain, the pod, the network
 
