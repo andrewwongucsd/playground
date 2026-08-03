@@ -4,7 +4,32 @@ The decisions that shaped the build, the bugs found getting it live, and — at 
 end — an explicit list of what still isn't proven. Most of the bugs only surfaced
 because there was a real deployment to break.
 
+**Never used Kubernetes?** Read the [Kubernetes primer](kubernetes-primer.md) first —
+it teaches the vocabulary from zero and carries the glossary for every term used here.
+[architecture.md](architecture.md) explains how the system is *built*; this document is
+what went *wrong* while building it, and what that cost.
+
+**How to read this.** Each section opens with a plain-English box and closes with one
+line you could say out loud. The bug stories are deliberately told with the symptom
+first, because that is the order you meet them in.
+
+---
+
+## Contents
+
+1. [Decisions](#decisions) — the trades made on purpose
+2. [Bugs a real deployment surfaced](#bugs-a-real-deployment-surfaced) — the ones a green pipeline never shows you
+3. [Storage gotchas worth remembering](#storage-gotchas-worth-remembering)
+4. [What "done" was allowed to mean](#what-done-was-allowed-to-mean)
+5. [What isn't proven yet](#what-isnt-proven-yet) — the honest list
+
+---
+
 ## Decisions
+
+> **In plain English:** none of these were obvious at the time. Each is a fork in the
+> road where the cheap option and the right option pointed different ways, and the
+> reason for going one way is written down so it can be argued with later.
 
 **Everything on one cloud, not split across vendors.** The Go server, *both* React
 frontends, and the database run on the same managed Kubernetes cluster. One platform,
@@ -12,9 +37,11 @@ one TLS setup, one deploy story. The alternative — parking the static frontend
 separate static-site vendor — would have meant two of everything for one small system.
 
 **An in-cluster database instead of a managed service.** Keeping Postgres in the
-cluster under an operator kept everything on one platform and inside the free tier. The
-cost was owning backups, which then became its own piece of work. That trade was made
-knowingly, not stumbled into.
+cluster under an operator kept everything on one platform and on shapes the provider
+gives away permanently. (Worth stating precisely: the *shapes* are free, the *account*
+is Pay-As-You-Go with no spending ceiling of its own — free here is a choice you keep
+making, not a wall you can lean on.) The cost was owning backups, which then became its
+own piece of work. That trade was made knowingly, not stumbled into.
 
 **Least privilege, three ways.** Three separate machine identities instead of one
 shared credential: a per-push deploy identity boxed into one namespace by RBAC, a
@@ -81,11 +108,25 @@ locally" and "actually tested in CI" are both true at once.
 **No passwords anywhere — two doors, one cookie.** Login is a one-time link or a signed
 mini-app payload from a chat platform. Nothing to hash, rate-limit, or leak, because
 there is no password to steal. Both paths converge on a single cookie helper, so the
-security flags can't drift apart. The token uses a cryptographic random source while
-the card shuffle uses the fast one: if guessing it lets someone in, it gets the slow
-generator. Consuming the token and creating the account happen in one transaction,
-because a crash between them would leave a link marked used with no account behind it.
-Where a consumed link *lands* is the one loose end: it still renders a "you're logged
+security flags can't drift apart.
+
+The login token comes from a cryptographic random source; the card shuffle uses the
+fast generator. The line between them is **not** "auth is serious and games are not" —
+it is what a successful guess actually *wins*. Guessing a login token gets you
+somebody's account, permanently. Guessing the shuffle gets you an edge in a
+practice-scoring game with no wagering, no payout, and no cash-out anywhere in the API.
+That boundary is what makes the fast generator acceptable, so the trigger is written
+down: **add stakes, a ranked ladder, or any persistent standing, and the shuffle needs
+`crypto/rand` too.**
+
+Consuming the token and resolving the account happen in one transaction, so a crash
+cannot mark a link used while leaving no account behind. But it stops one step short.
+Creating the *session row* happens **after** the commit — so if that insert fails, the
+user gets a 500 and the link is already burned. That is the same class of bug the
+transaction was written to prevent, arriving one step later. Small window, small blast
+radius, and listed here rather than left to read as solved.
+
+Where a consumed link *lands* is the other loose end: it still renders a "you're logged
 in" page telling you to return to the tab that asked — which stopped being true the
 day links started arriving as a DM. The redirect that fixes it is written but not
 merged, so it is listed under what isn't proven rather than claimed here.
@@ -95,11 +136,12 @@ Two places needed a secret that isn't a session. A matchmaking key is proved on 
 connection and used on another, so it round-trips through the client under a MAC —
 domain-separated from the other signatures sharing the same key, because one secret
 signing three different things is how cross-protocol replays happen. A platform
-webhook authenticates on an echoed shared secret compared in constant time, where an
-*unset* secret rejects every delivery rather than falling open: the URL isn't a
-secret, it's in an ingress rule and in TLS SNI, so the shared secret is the only thing
-separating a real delivery from a forged one. Both defaults point the same way —
-unverifiable input gets the least-privileged outcome, never the convenient one.
+webhook authenticates on an echoed shared secret, compared in constant time. An
+*unset* secret rejects every delivery rather than falling open — and that default
+matters, because the URL isn't a secret. It sits in an ingress rule and in TLS SNI. The
+shared secret is the only thing separating a real delivery from a forged one. Both
+defaults point the same way: unverifiable input gets the least-privileged outcome,
+never the convenient one.
 
 **Alert on symptoms and burn rates, not on thresholds.** A dashboard nobody watches
 isn't monitoring, and a threshold alert either pages on every blip or sleeps through a
@@ -129,13 +171,41 @@ provisioned at the cloud layer and costs nothing at rest, but its controller is
 
 ## Bugs a real deployment surfaced
 
+> **In plain English:** every one of these passed code review, passed CI, and showed a
+> green checkmark. They are here because that is exactly what made them expensive — a
+> failure that announces itself gets fixed in an hour, and a failure that reports
+> success can sit there for weeks.
+
 **The images were built for the wrong CPU architecture.** Runners are x86-64; the
 cluster's nodes are ARM. Images were being built for the runner and would have failed
-at container start with `exec format error`. Nothing caught it for weeks, because the
-node pool was capacity-blocked so long the pod never left `Pending` — there was never a
-running node to fail the pull on. Fixed with a cross-build that compiles for the target
-architecture without emulation. A latent bug can hide behind an unrelated blocker for
-as long as that blocker lasts.
+at container start with `exec format error`.
+
+```
+   WHERE IT WAS BUILT              WHERE IT WOULD RUN
+   ------------------              ------------------
+   CI runner: x86-64        -->    cluster node: ARM
+        |                                |
+        v                                v
+   binary of x86 machine           the CPU cannot decode those
+   instructions                    instructions at all
+                                          |
+                                          v
+                                   `exec format error` on start
+
+   WHY NOBODY NOTICED FOR WEEKS:
+
+   the node pool was capacity-blocked, so the pod never left `Pending`
+        |
+        v
+   Pending means never scheduled -> never pulled -> never started
+        |
+        v
+   the error needs a RUNNING node to happen on. There wasn't one.
+```
+
+Fixed with a cross-build that compiles for the target architecture without emulation.
+**A latent bug can hide behind an unrelated blocker for as long as that blocker
+lasts** — and when the blocker clears, you get both problems at once.
 
 **The session cookie was insecure behind the proxy.** The login cookie set its `Secure`
 flag from whether the *server* saw a TLS connection. But TLS terminates at the ingress,
@@ -148,11 +218,26 @@ what your process saw.
 
 **A workflow reported success while doing nothing.** After adding a manual-dispatch
 trigger, the publish-and-deploy jobs still gated on the event being a push. A manual run
-therefore built and scanned, then *silently skipped* publishing and deploying — and a
-job made entirely of skipped steps reports **success**. Several green runs deployed
-nothing at all; the tell was diagnostics showing no ingress objects and week-old
-crash-looping pods. A pipeline that can skip its real work and still show green is worse
-than one that fails, because the green actively lies.
+therefore built and scanned, then *silently skipped* publishing and deploying.
+
+```
+   a MANUAL run                        every step's condition:  if event == "push"
+   ------------                        ----------------------
+   build    -> ran                     (no condition)          ✓
+   scan     -> ran                     (no condition)          ✓
+   push     -> SKIPPED                 event was "dispatch"    -
+   deploy   -> SKIPPED                 event was "dispatch"    -
+        |
+        v
+   a job made entirely of SKIPPED steps reports ......... SUCCESS ✅
+        |
+        v
+   green checkmark. Nothing was published. Nothing was deployed.
+```
+
+Several green runs deployed nothing at all; the tell was diagnostics showing no ingress
+objects and week-old crash-looping pods. **A pipeline that can skip its real work and
+still show green is worse than one that fails, because the green actively lies.**
 
 **An invalid character made a workflow silently not run.** A zero-second failure with no
 logs, caused by an unquoted colon in a YAML string that invalidated the whole file. "It
@@ -171,39 +256,119 @@ application's contract.
 
 **The monitoring stack didn't fit — and the installer reported success.** Installing it
 on a one-core node "succeeded": the install command waited, returned green, and the
-metrics store then sat `Pending` for **23 hours** before anyone looked. The wait only
-covers the chart's own resources, and the operator creates the real pod *afterwards*, so
-the wait never saw it fail to schedule. A resource request that can't be satisfied isn't
-an error — it's a pod waiting politely, forever.
+metrics store then sat `Pending` for **23 hours** before anyone looked.
+
+```
+   t=0    install chart --wait
+             |
+             v
+          creates the chart's OWN resources ......... all Ready ✓
+             |
+             v
+   t=30s  --wait is satisfied. Command exits GREEN. ✅
+             |
+             |   ... but the chart installed an OPERATOR, and the operator
+             |       creates the real metrics pod a moment LATER ...
+             v
+   t=40s  operator creates the metrics pod
+             |
+             v
+          scheduler: "you asked for more CPU than any node has free"
+             |
+             v
+   t=40s  Pending ......... and still Pending 23 HOURS later.
+
+   The wait watched the wrong generation of objects. It could not have
+   caught this: the thing that failed did not exist yet when it stopped
+   watching.
+```
+
+**A resource request that can't be satisfied isn't an error — it's a pod waiting
+politely, forever.**
 
 That one incident taught three separate things:
 
 - **Requests are reservations, not usage.** The scheduler enforces what you asked for
   even when actual consumption is a fraction of it. On an idle service the gap is
   enormous, and it is the *request* that decides whether anything else fits.
-- **A full node can't roll.** A rolling update wants to start a new pod before retiring
-  the old one, and on a saturated node that surge pod has nowhere to go — so the rollout
-  hangs rather than failing cleanly.
+- **A full node can't roll.** A *rolling update* replaces pods one at a time, starting
+  the new one **before** retiring the old — briefly needing room for both. That extra
+  copy is the "surge" pod, and on a saturated node it has nowhere to go, so the rollout
+  hangs rather than failing cleanly. Zero-downtime updates need spare capacity to be
+  possible at all.
 - **Add before you replace.** The safe node migration brings up the bigger node *before*
   draining the old one. That discipline paid immediately: the replacement node failed to
   register — a timeout, not a capacity problem — and because nothing had been drained,
   it was a no-op rollback instead of an outage.
 
-**Draining a stateful pod has its own trap, and forcing it costs six minutes.** A
-single-instance database pod can't be evicted while its disruption budget insists on
-keeping one copy, so the drain waits forever. The eviction policy has to be set *before*
-the drain, not during. Terminating the node's instance outright is safe by design here —
-the data lives on a separate volume, not the boot disk — but recovery wasn't instant:
-the record of the old attachment lingers, so the volume can't reattach until the
-controller force-detaches from the unreachable node, roughly six minutes later. The
-honest cost of a *forced* stateful migration is a six-minute outage, not the few seconds
-a graceful pod move takes.
+**Draining a stateful pod has its own trap, and forcing it costs six minutes.**
+
+Three words first, because the story is unreadable without them. **Draining** a node
+means politely emptying it before maintenance — asking every pod to leave. **Evicting**
+is that ask, applied to one pod. A **PodDisruptionBudget** is a floor you set on
+availability: *"never leave me with fewer than this many copies."* Now the trap is
+visible:
+
+```
+   THE GRACEFUL PATH (what you expect)
+   -----------------------------------
+   drain node -> evict pod -> pod restarts elsewhere -> volume follows
+                                                        seconds
+
+   THE DEADLOCK (what happened)
+   ----------------------------
+   drain node ---> "may I evict the database pod?"
+                         |
+                         v
+              PodDisruptionBudget: "keep at least 1 copy"
+                         |
+                         v
+              there IS only 1 copy. Evicting it leaves 0.
+                         |
+                         v
+              REFUSED -> the drain waits. Forever. No error, no timeout.
+
+   THE FORCED PATH (the way out, and its price)
+   --------------------------------------------
+   terminate the node outright
+        |   safe here: the data is on a separate volume, not the boot disk
+        v
+   new pod starts elsewhere and asks for its volume
+        |
+        v
+   the volume is still recorded as ATTACHED to a node that no longer answers
+        |
+        v
+   wait for the controller to force-detach it .......... ~6 MINUTES
+        |
+        v
+   attach -> mount -> start
+```
+
+The budget has to be relaxed *before* you start the drain, not during — once the drain
+is waiting, it is waiting on a rule you can no longer change in time to help.
 
 **A one-line security hardening took the site down.** Setting a read-only root
 filesystem on the game server shipped like any other change. The rollout never went
-Ready and the game served `503` while the static frontend kept answering `200` — a
-half-up appearance that is genuinely worse than a clean outage, because it reads as
-"mostly fine." The recovery was to revert the manifest and let the pipeline redeploy.
+Ready and the game served `503` while the static frontend kept answering `200`.
+
+```
+   WHAT A MONITOR SAW                  WHAT A PLAYER SAW
+   ------------------                  -----------------
+   GET /            -> 200  ✓          page loads, looks perfect
+   GET /healthz     -> 200  ✓                  |
+        ^                                      v
+        |  both served by the             click "play" -> nothing
+        |  STATIC frontend, which          works. The socket 503s.
+        |  was never touched
+                                       "Is the site up?" has two
+   GET /queue       -> 503  ✗          different true answers.
+   GET /ws          -> 503  ✗
+```
+
+A half-up appearance is genuinely worse than a clean outage, because it reads as
+"mostly fine" — to a person *and* to any check that happens to probe the wrong path.
+The recovery was to revert the manifest and let the pipeline redeploy.
 Two lasting outputs: a rollback runbook written the same day while the commands were
 still exact, including the hour lost to a theory the facts disproved; and the note that
 a timed-out rollout tells you pods aren't Ready but never *why*, so getting the why
@@ -211,19 +376,33 @@ first is worth the minute.
 
 **"Run as non-root" needs a number, not a name.** A second hardening change in the same
 batch declared that the pod must run as a non-root user. The image already did — but
-the kubelet has to *verify* that before starting the container, and it can only do so
-from a numeric user id. Given a username, it cannot resolve the name to prove anything,
-so it refuses the container outright with a config error. The site went down until it
+the **kubelet** (the agent on each node that actually starts containers) has to
+*verify* that claim before starting it, and it can only do so from a numeric user id.
+Given a username, it cannot resolve the name to prove anything, so it refuses the
+container outright with a config error. The site went down until it
 was diagnosed. Pinning the user and group to the image's actual numeric ids made the
 claim checkable. The general shape is the same as the read-only filesystem incident:
 a declaration that *looks* like documentation is enforced by something with an opinion,
 and the enforcement happens at container start, not at review time.
 
-**A silent selector scraped nothing.** The metrics operator only discovers scrape
-targets carrying its own release label by default. Point it at a target in another
-namespace without widening that selector and you get no error, no warning, and empty
-graphs — the most expensive kind of failure, because everything looks installed. Check
-for *data*, not for a green install.
+**A silent selector scraped nothing.** Prometheus does not receive metrics; it goes
+and fetches them, and the things it fetches from are called **scrape targets**. Which
+targets it will even look at is decided by a label selector — and by default the
+operator only adopts targets stamped with its own release label.
+
+```
+   target in another namespace, no matching label
+             |
+             v
+   the operator never adopts it -> Prometheus never scrapes it
+             |
+             v
+   no error. No warning. No failed pod. Just empty graphs.
+```
+
+That is the most expensive kind of failure, because everything *looks* installed —
+green install, Ready pods, a dashboard that renders perfectly with nothing in it.
+**Check for data, not for a green install.**
 
 **A Ready pod can still be wired wrong.** The trace datasource was pointed at the log
 store's port. The install was happy, the pod was Ready, and every query came back empty.
@@ -263,6 +442,10 @@ downstream can tell the difference between "no answer" and "no attempt".
 
 ## Storage gotchas worth remembering
 
+> **In plain English:** two settings on a storage bucket that sound like they should
+> work together, and don't. Neither is written down anywhere obvious — both were
+> discovered by an `apply` failing.
+
 Two object-storage behaviours that were real `apply`-time errors, not anything
 documented up front:
 
@@ -270,23 +453,47 @@ documented up front:
   retention setting was actually a write-once-read-many lock, and it refused to coexist
   with versioning. Expiry turned out to be a *separate* lifecycle-policy resource.
 - **A lifecycle policy needs the storage service's own principal granted on the bucket
-  first.** The deletions are executed by the service itself, so the policy can't even be
-  created until that principal has rights — the one permission grant in the whole project
-  made to a cloud *service* rather than to a user or a machine identity.
+  first.** The deletions are performed by the storage service itself, not by you. So the
+  policy cannot even be *created* until that service has rights on the bucket. It is the
+  one permission in the whole project granted to a cloud *service* rather than to a
+  person or a machine identity.
+
+> **Say it in one line:** a setting that sounds like a preference may be a lock, and a
+> policy you write may be executed by someone who needs their own permission.
 
 ## What "done" was allowed to mean
 
-A green pipeline proves the API accepted a desired state. It does not prove the thing
-works. The real acceptance checks were: every hostname returning `200` to a *standard*
-client with no certificate-verification bypass; the certificate issuer reading as the
-real authority rather than the ingress controller's placeholder; a full round of the
-game played end to end over a real secure WebSocket with the outcome persisted to the
-database; and an on-demand backup verified to have actually written objects to the
-bucket.
+> **In plain English:** "the deploy succeeded" only means a server accepted your
+> instructions. It says nothing about whether the thing works. So "done" was defined as
+> a short list of things a person actually did, not things a pipeline reported.
 
-**A played hand beats a green check.**
+A green pipeline proves the API accepted a desired state. It does not prove the thing
+works. Four checks were allowed to count:
+
+```
+   ✓ every hostname returns 200 to a STANDARD client
+       -- no certificate-verification bypass, no `-k`, no exceptions
+
+   ✓ the certificate issuer reads as the real authority
+       -- not the ingress controller's built-in placeholder cert
+
+   ✓ a FULL ROUND of the game played end to end over a real secure socket
+       -- with the outcome persisted to the database afterwards
+
+   ✓ an on-demand backup verified to have written real objects to the bucket
+       -- checked in the bucket, not inferred from an exit code
+```
+
+Each one is phrased to be un-fakeable by a green checkmark. The pattern is the same
+every time: **check the effect, not the report.**
+
+> **Say it in one line:** a played hand beats a green check.
 
 ## What isn't proven yet
+
+> **In plain English:** the list nobody puts in a portfolio. Everything below is built
+> but unexercised — and until it has been exercised, it is a belief rather than a
+> capability. Writing them down is the point; a gap you have named is a plan.
 
 Stating this is part of the engineering, not an apology for it.
 
@@ -311,15 +518,28 @@ Stating this is part of the engineering, not an apology for it.
   move CPU, so it is a weak proxy for real load. The better signal is active rooms per
   pod, and the upgrade to it is staged in the file rather than pretended away.
 - **A login link still lands on a dead-end page.** The one-time link sets the session
-  correctly, then renders "you're logged in — close this tab and go back," advice that
-  stopped being true when links began arriving as a bot DM rather than in a tab the
-  user already had open. The redirect that fixes it is authored and sitting on a
-  branch, unmerged. Nothing is broken about the *auth*; the last screen just lies about
-  what to do next, which is its own kind of bug.
+  correctly, then renders "you're logged in — close this tab and go back." That advice
+  was true when a waiting tab existed. It stopped being true the day links began
+  arriving as a bot DM, sending people back somewhere they had never been. The redirect
+  that fixes it is authored and sitting on a branch, unmerged. Nothing is broken about
+  the *auth*; the last screen just lies about what to do next, which is its own kind of
+  bug.
 - **The game client has no automated tests.** The pure client-side libraries in the
   other product are unit-tested, and the server's real-socket test verifies the wire
   protocol from the Go side. The browser client is verified by hand. That's a real gap,
   and the top of the test pyramid above is drawn empty on purpose.
+- **Terraform state still lives on one machine.** Two of the three machine identities
+  have their key pairs *generated* by Terraform, which means their private keys sit in
+  the state file — and that file has no remote backend, no locking, and no versioning.
+  A remote encrypted backend with state locking is now authored but **not migrated**,
+  and the two key pairs have **not been rotated**, which they must be once it is. Losing
+  that file wouldn't take the site down; it would do something worse — leave the
+  infrastructure running while becoming unmanageable, recoverable only by importing
+  every resource back by hand.
+- **The session-row gap in the login flow.** Described under Decisions above: token
+  consumption and account resolution are atomic, but the session insert that follows is
+  not, so a failure there burns a link for good. Small window, small blast radius, and
+  an unambiguous fix — move the insert inside the transaction — that hasn't been made.
 
 > **Say it in one line:** an untested backup, an unfired alert, and an unrun load
 > test are three hypotheses — and calling them anything else is how outages get

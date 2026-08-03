@@ -57,7 +57,7 @@ The whole case study compresses to twelve sentences. Each one was paid for by so
 
 ## Highlights
 
-- 🏗️ **100% infrastructure as code.** Network, cluster, node pool, and every identity in Terraform. Nothing was clicked into a console.
+- 🏗️ **Infrastructure as code, with one named exception.** Network, cluster, node pool, and every identity in Terraform — reviewable, reproducible, destroyable. The **DNS records are the exception**: they're typed into the registrar by hand, so they're the one layer with no plan, no review, and no history. Called out rather than rounded up to "100%".
 - 🔐 **Three least-privilege identities**, their keys generated *inside* Terraform. The credential that runs on every push can touch one namespace. The one that lives permanently in the cluster can touch one bucket.
 - 🛡️ **A pipeline of gates.** Cross-built for ARM, Trivy-scanned for critical CVEs *before* the registry, signed with keyless cosign and a Syft SBOM attached, then blocked on the rollout actually reporting Ready.
 - 🧱 **A public edge hardened for the open internet.** Per-IP connection caps and token-bucket rate limits, capped frame sizes, read/write deadlines, and a ping/pong keepalive that reaps sockets whose clients vanished without a goodbye.
@@ -65,7 +65,7 @@ The whole case study compresses to twelve sentences. Each one was paid for by so
 - 📈 **Elastic, but bounded.** Overflow spills to a **scale-to-zero** burst node pool with a hard, documented cost ceiling. Idle costs `$0`. A graceful `SIGTERM` drain lets in-progress hands finish before a pod retires.
 - 🔭 **All three observability pillars.** Prometheus and Grafana, Loki with an Alloy agent, OpenTelemetry into Tempo. RED signals *plus* game-domain gauges — hands in progress, human-versus-bot seats, join attempts by outcome. Metrics live on a port the public ingress cannot route to. Dashboards live in git.
 - 🎯 **SLOs with multi-window burn-rate alerting.** Fast burn pages, slow burn tickets, and both windows must agree before either fires. Every alert names a symptom and links a runbook.
-- 🛰️ **An external eye, outside the blast radius.** Every pillar above runs *inside* the cluster — so a node, balancer, ingress, DNS, or certificate failure would take the monitoring down with the site. A scheduled probe watches the public endpoints and certificate expiry from outside that failure domain and files a ticket when they break.
+- 🛰️ **An external eye, outside the blast radius.** Every pillar above runs *inside* the cluster — so a node, balancer, ingress, DNS, or certificate failure would take the monitoring down with the site. A scheduled probe watches the public endpoints and certificate expiry from outside that failure domain and files a ticket when they break. It asks for every 15 minutes and a free hosted scheduler gives it roughly every 60 — a real limit, measured and written down rather than rounded away.
 - 🧪 **Testing that crosses the real boundary.** Real sockets, real goroutines, a real Postgres in CI. Two genuine bugs were invisible to in-process fakes and surfaced only against a real connection.
 - 🔎 **Operated through pipelines, not a laptop.** The cluster API was unreachable from the workstation for most of the build, so every operation runs through CI — including a purpose-built read-only diagnostics workflow.
 - 🚧 **Honest about staged versus live.** GitOps with a metric-gated canary, default-deny network policies, and the node autoscaler are authored and validated but deliberately switched off. The table below says which is which.
@@ -273,7 +273,8 @@ And what is deliberately *not* claimed:
 
 | Doc | What's in it |
 | --- | --- |
-| 📐 [**Architecture**](docs/architecture.md) | The request path, network topology, identity rings, TLS issuance, data durability, scaling, observability, delivery, and hardening — with the diagrams. |
+| 🎓 [**Kubernetes primer**](docs/kubernetes-primer.md) | **Start here if you've never used Kubernetes.** The vocabulary from zero — the control plane, the four workload types, storage, RBAC, operators, Helm vs Kustomize — taught through the seven things people actually use it for, with this system's real manifests as the examples. Carries the glossary. |
+| 📐 [**Architecture**](docs/architecture.md) | The request path, network topology, identity rings, edge hardening, the game protocol, TLS issuance, data durability, scaling and its cost ceiling, observability, testing, delivery, and hardening — with the diagrams, and every section closing on one line you could say out loud. |
 | 🛠️ [**Engineering highlights**](docs/engineering-highlights.md) | The decisions, the production bugs in depth, and an explicit list of what remains unproven. |
 
 ---
