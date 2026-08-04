@@ -6,6 +6,15 @@
 
 A case study, not a codebase. This repo documents the architecture, the decisions, and the production bugs worked through to get two products live on a managed cloud cluster.
 
+**Everything described here is running:**
+[the toolbox](https://leetcodewarrior.com) ·
+[the card game](https://big2.leetcodewarrior.com) ·
+[a scheduler that kills its own workers](https://mini-scheduler.leetcodewarrior.com)
+
+<sub>The application source is in a private repo. What is public is this write-up
+and the running system it describes — read the write-up for the reasoning, open
+the links to check that it is real.</sub>
+
 <br>
 
 <img src="docs/assets/big2-demo.gif" alt="A recorded session of the live game: entering a nickname, taking a seat, the table filling with bots, then playing a hand — cards leaving the hand as each trick resolves" width="300">
