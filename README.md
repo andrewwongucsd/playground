@@ -8,9 +8,9 @@ A case study, not a codebase. This repo documents the architecture, the decision
 
 <br>
 
-<img src="docs/assets/game-table.svg" alt="The real-time game table — a five-card straight on the center pile, a pair selected in your hand, and three bot-filled opponent seats with chip counts" width="840">
+<img src="docs/assets/big2-demo.gif" alt="A recorded session of the live game: entering a nickname, taking a seat, the table filling with bots, then playing a hand — cards leaving the hand as each trick resolves" width="300">
 
-<sub><i>The real-time table — your fanned hand, the live center pile, and three bot-filled seats (UI illustration).</i></sub>
+<sub><i>A real session against the live deployment — take a seat, bots fill the table, play a hand.<br>Recorded 2026-08-03; trimmed and sped up, not staged.</i></sub>
 
 <br>
 
@@ -36,7 +36,7 @@ A case study, not a codebase. This repo documents the architecture, the decision
 
 ## The one-paragraph version
 
-Two small products — a real-time multiplayer card game and a browser-only developer-utilities toolbox — run on a **single always-free ARM node** in a managed Kubernetes cluster. Everything around them is built the way a production system is built. The network, the cluster, and every machine identity are Terraform. The pipeline scans images before they reach the registry, signs what it ships, and refuses to call a deploy done until the pods are genuinely Ready. Postgres runs under an operator and streams its write-ahead log to object storage. Metrics, logs, and traces land in one pane, with error-budget burn-rate alerts on top. The game server drains in-flight hands on `SIGTERM` so elasticity never costs a player their game. It is small on purpose — and operated like it isn't.
+Two small products — a real-time multiplayer card game and a browser-only developer-utilities toolbox — run on a **single always-free ARM node** in a managed Kubernetes cluster. Everything around them is built the way a production system is built. The network, the cluster, and every machine identity are Terraform. The pipeline scans every image before it reaches the registry, signs and SBOMs the game's images, and refuses to call a deploy done until the pods are genuinely Ready. Postgres runs under an operator and streams its write-ahead log to object storage. Metrics, logs, and traces land in one pane, with error-budget burn-rate alerts on top. The game server drains in-flight hands on `SIGTERM` so elasticity never costs a player their game. It is small on purpose — and operated like it isn't.
 
 ## Twelve lines that survived contact with production
 
@@ -59,7 +59,7 @@ The whole case study compresses to twelve sentences. Each one was paid for by so
 
 - 🏗️ **Infrastructure as code, with one named exception.** Network, cluster, node pool, and every identity in Terraform — reviewable, reproducible, destroyable. The **DNS records are the exception**: they're typed into the registrar by hand, so they're the one layer with no plan, no review, and no history. Called out rather than rounded up to "100%".
 - 🔐 **Three least-privilege identities**, their keys generated *inside* Terraform. The credential that runs on every push can touch one namespace. The one that lives permanently in the cluster can touch one bucket.
-- 🛡️ **A pipeline of gates.** Cross-built for ARM, Trivy-scanned for critical CVEs *before* the registry, signed with keyless cosign and a Syft SBOM attached, then blocked on the rollout actually reporting Ready.
+- 🛡️ **A pipeline of gates.** Cross-built for ARM, Trivy-scanned for critical CVEs *before* the registry, then blocked on the rollout actually reporting Ready. The game's two images are also signed with keyless cosign and carry a Syft SBOM attestation; the toolbox image is scanned and rollout-gated but **not yet signed**, and nothing verifies a signature at admission.
 - 🧱 **A public edge hardened for the open internet.** Per-IP connection caps and token-bucket rate limits, capped frame sizes, read/write deadlines, and a ping/pong keepalive that reaps sockets whose clients vanished without a goodbye.
 - 🔄 **Continuous WAL archiving to object storage** — the difference between losing a day and losing a few minutes. The restore drill is named as the next phase, not claimed as done.
 - 📈 **Elastic, but bounded.** Overflow spills to a **scale-to-zero** burst node pool with a hard, documented cost ceiling. Idle costs `$0`. A graceful `SIGTERM` drain lets in-progress hands finish before a pod retires.
@@ -142,7 +142,7 @@ A portfolio that only lists wins is a portfolio you can't trust. This is the rea
 
 | | Capability | Status |
 | --- | --- | --- |
-| 🟢 | IaC, CI/CD with scan + rollout gates, ingress + auto-renewing TLS, operator-run Postgres, WAL archiving, three-pillar observability, an external synthetic monitor, SLO rules and routing, pod autoscaling, graceful drain, image signing + SBOM, Pod Security Standards at `baseline` | **Live** |
+| 🟢 | IaC, CI/CD with scan + rollout gates, ingress + auto-renewing TLS, operator-run Postgres, WAL archiving, three-pillar observability, an external synthetic monitor, SLO rules and routing, pod autoscaling, graceful drain, image signing + SBOM (the game's two images), Pod Security Standards at `baseline` | **Live** |
 | 🟡 | GitOps with a metric-gated canary, default-deny network policies, the node autoscaler | **Authored and validated, deliberately off.** A canary needs a second pod the one baseline node can't fit; unenforced network policies would read as protection they don't provide. |
 | 🔴 | A rehearsed database restore, an alert that actually reached a human, the load test that right-sizes the autoscaler | **Not yet proven.** Backups are verified to write objects but no restore has been performed. Alert delivery is wired to a chat bot but has never fired in anger. The k6 test is written; the autoscaler's CPU target is still a committed placeholder. |
 
@@ -154,6 +154,14 @@ A portfolio that only lists wins is a portfolio you can't trust. This is the rea
 | --- | --- | --- |
 | 🃏 **Multiplayer card game** | Real-time [Big Two](https://en.wikipedia.org/wiki/Big_two) — a pure rules engine, a WebSocket server with matchmaking and bot fill-in, a browser table UI. Two passwordless login paths, a bilingual interface, and a speech-synthesis dealer that calls each play aloud. Practice scoring only, no wagering. | Go · React · TypeScript |
 | 🧰 **Developer utilities toolbox** | Nine browser-only tools: JSON/YAML tree editor, Base64/URL/JWT, regex tester, hash & UUID, timestamp & cron, QR codes, a WYSIWYG Markdown editor, a thumbnail grabber, an image converter. Every one runs entirely client-side — nothing uploaded. | React · TypeScript |
+
+<div align="center">
+
+<img src="docs/assets/game-table.svg" alt="The real-time game table — a five-card straight on the center pile, a pair selected in your hand, and three bot-filled opponent seats with chip counts" width="840">
+
+<sub><i>The table, drawn out — your fanned hand, the live center pile, and three bot-filled seats (UI illustration).</i></sub>
+
+</div>
 
 Two product details worth their own line, because both were judgement calls rather than features:
 
@@ -250,6 +258,7 @@ GitOps with a metric-gated canary, default-deny network policies, and node autos
 - **🔒 A one-line hardening took the site down — twice.** A read-only root filesystem shipped, the rollout never went Ready, and the game served `503` while the static frontend still served `200`. Half-up looks fine and isn't. In the same batch, declaring "run as non-root" without a *numeric* user id meant the kubelet couldn't verify the claim and refused the container outright. Both reverted, both written up the same day.
 - **🪣 Object storage rejected the backup writer's encoding.** Backups failed with a buried `exit status 4`; the real cause was the cloud's S3 API refusing the AWS SDK's newer chunked payload encoding. Reproduced *and* fixed against the live bucket before touching the cluster.
 - **📡 A Ready pod can still be wired wrong.** A trace datasource was pointed at the log store's port. The install was green, the pod was Ready, and every query returned nothing. Confirm ports from the resource, not from muscle memory.
+- **🧠 A pillar that was "installed" for eight days had never once stayed up.** Tempo was `OOMKilled` on a 512Mi memory limit — **2,251 restarts** before anyone looked. Its own logs were no help: it started cleanly every time, brought up every module, opened every receiver, and was then killed by the kubelet, so nothing in them said *out of memory*; only `lastState.terminated.reason` did. The install had reported success, so the traces pillar read as done for its entire life. Then the fix wouldn't land either: **a StatefulSet's rolling update will not replace a pod that is already unhealthy**, so raising the limit changed nothing a pod that was never recreated could act on — `helm --wait` sat there and timed out while the restart count climbed on the same eight-day-old pod. Deleting it was the fix. Two lessons, one bug: *installed is not running*, and *a crashlooping StatefulSet has to be pushed, not patched*.
 - **🧵 A flaky test where both outcomes were correct.** A test asserted the server drops an oversized frame — but the client's write and the server's close are two ends of one socket racing. Either side can win, and *both* prove the cap held. The test was accepting one of two correct answers.
 
 ## How "done" was verified — and what isn't

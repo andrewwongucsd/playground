@@ -1942,14 +1942,23 @@ genuinely separate win, and it is the half that needs the four pods.
 
 ### The supply chain
 
-Trivy scans every image before the push. Then **keyless cosign** signs it — the build
-workflow's own OIDC identity is the signer, so there is no long-lived key to store,
-rotate, or leak, and the signature is recorded in Sigstore's public transparency log.
+Trivy scans every image before the push. The game's two images are then signed by
+**keyless cosign** — the build workflow's own OIDC identity is the signer, so there is
+no long-lived key to store, rotate, or leak, and the signature is recorded in
+Sigstore's public transparency log.
 A Syft-generated **SBOM** — a software bill of materials, the full ingredient list of
 every library inside the image — is attached as an attestation to the same digest,
 which turns "are we affected by this new CVE?" from a rebuild-and-grep into a query. A
 second, report-only config scan flags build-file smells without blocking a deploy the
 day a scanner ships a new rule.
+
+Two limits worth stating rather than rounding away. The signing and SBOM steps live in
+the game's workflow only — the utilities toolbox image is built, scanned, and
+rollout-gated the same way, but ships **unsigned**: two of the three published images
+carry a signature and an attestation, not all three. And nothing *verifies* a signature
+at deploy time — there is no admission policy that refuses an unsigned image. The
+signature proves provenance to anyone who runs `cosign verify`; it does not yet gate
+what the cluster will run.
 
 ```
    source

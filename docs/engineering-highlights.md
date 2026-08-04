@@ -154,9 +154,12 @@ number," it's "what do I do."
 **Sign what ships; declare what the image already is.** Keyless signing means the build
 workflow's own identity is the signer, so there's no key to store or leak, and the
 signature lands in a public transparency log. An SBOM rides along as an attestation on
-the same digest. The pod's security context mostly *declares* properties the
-distroless non-root image already had — which is the point, because an unenforced
-property is a promise, and declaring it is what makes it enforceable and auditable.
+the same digest. Scoped honestly: the game's two images are signed, the toolbox image
+is not, and no admission policy yet refuses an unsigned one — the signature is
+provenance anyone can check, not a gate the cluster enforces. The pod's security
+context mostly *declares* properties the distroless non-root image already had — which
+is the point, because an unenforced property is a promise, and declaring it is what
+makes it enforceable and auditable.
 
 **Stage what the cluster can't yet hold.** GitOps and a metric-gated canary are
 authored, schema-validated, and *deliberately switched off*: a canary needs a second
@@ -407,6 +410,47 @@ green install, Ready pods, a dashboard that renders perfectly with nothing in it
 **A Ready pod can still be wired wrong.** The trace datasource was pointed at the log
 store's port. The install was happy, the pod was Ready, and every query came back empty.
 Confirm ports from the resource, not from muscle memory.
+
+**A pillar that was "installed" for eight days had never once stayed up.** Tempo's
+memory limit was set to 512Mi. It was `OOMKilled` 2,251 times over eight days — never
+surviving startup, not once — while every manifest and every install log said the
+traces pillar was done. It runs at a 2Gi limit; the chart's own example sizes this
+component at a 4Gi *request*, so 512Mi was never in the right range.
+
+Three things made it invisible, and each is worth naming separately:
+
+```
+  1. the install reported success        helm --wait covers the chart's own
+                                         resources; a container that dies AFTER
+                                         the first probe passes is not its problem
+
+  2. its own logs said nothing wrong     Tempo started cleanly every time -- every
+                                         module up, every receiver listening -- and
+                                         was then killed BY THE KUBELET. The process
+                                         never failed, so it never logged a failure.
+                                         Only lastState.terminated.reason names it:
+                                         OOMKilled, exit 137.
+
+  3. the fix would not land either       a StatefulSet's rolling update will not
+                                         replace a pod that is already unhealthy, so
+                                         raising the limit changed nothing: the
+                                         controller kept restarting the SAME pod.
+                                         Restart count climbed 2251 -> 2254 on a pod
+                                         whose age never reset, and helm --wait timed
+                                         out having changed nothing observable.
+```
+
+The repair was to stop waiting on a deadlock: apply the values, delete the stuck pod so
+it comes back on the new template, then gate on `rollout status`. It came up healthy on
+the first try, and Tempo's API now answers with `big2-server` as a service that has sent
+it traces — which is the check that should have been run on day one.
+
+What it cost to find was one question nobody had asked in eight days — *is the pod
+Running?* — which is the same question the Prometheus-`Pending` bug above asked, in a
+form that `kubectl get pods` answers instantly. The diagnostics workflow now dumps a
+crashlooping container's previous logs and its termination reason, and asks Prometheus
+whether each SLI actually has samples, because "the rule applied" and "the rule
+measures something" are different claims.
 
 **A flaky test where both outcomes were correct.** A test asserted that the server tears
 down a connection after an oversized frame. But the client's write and the server's
