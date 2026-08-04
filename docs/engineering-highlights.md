@@ -545,10 +545,13 @@ Stating this is part of the engineering, not an apology for it.
   verified to write objects, but recovery has never been exercised. By this project's
   own standard that makes it a hypothesis. Rehearsing it — with a defined recovery point
   and recovery time objective — is the next phase.
-- **No alert has ever been delivered in anger.** Routing, severities, and the inhibition
-  rule are wired, and delivery points at a real chat bot rather than the default
-  receiver that notifies nobody. It has not yet fired on a live incident, so it is
-  listed as unverified.
+- **No alert has ever been delivered in anger — and the delivery path is not actually
+  switched on.** Routing, severities, and the inhibition rule are wired, and a chat-bot
+  receiver is authored in full. But the installer applies it only when *both* its bot
+  token and its chat id are configured, and the chat id is unset — so the condition
+  fails and alerts fall through to the default receiver that notifies nobody. It is one
+  variable away from real delivery, which is a materially different claim from "wired to
+  a chat bot," and the honest version is the one worth writing down.
 - **The load test hasn't been run.** The scenario is written — each virtual user plays a
   full hand over a real socket — but it has not been executed, so the pod autoscaler's
   CPU target is still a placeholder, and the manifest says so in a comment. Untested

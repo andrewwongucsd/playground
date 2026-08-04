@@ -109,7 +109,7 @@ Both live behind one public entrance:
                                           is the Go server
 ```
 
-**One machine, on purpose.** The baseline is a single always-free ARM node. Every
+**One machine, on purpose.** The baseline is a single ARM node on a free shape. Every
 design decision below is shaped by that: there is rarely room for a second copy of
 anything, which is why several capabilities in this document are *authored but
 switched off* rather than claimed as live.
@@ -1771,10 +1771,12 @@ incident, one stream. Every alert names a *symptom* — users are getting errors
 a cause like high CPU, and every one carries a runbook link, because the question at
 3 a.m. is never "what's the number" but "what do I do."
 
-Delivery is wired to a chat bot rather than left on the default receiver that notifies
-nobody. It has never fired in anger, so it is listed as unproven rather than claimed
-as working. An untested notification path deserves exactly the same skepticism as an
-untested backup.
+A chat-bot receiver is authored in full, but it is applied only when *both* its bot token
+and its chat id are configured — and the chat id is unset, so the condition fails and
+alerts still fall through to the default receiver that notifies nobody. It is one
+variable away from real delivery. That distinction is worth stating precisely rather
+than rounding up to "delivery is wired": an untested notification path deserves the same
+skepticism as an untested backup, and an *unactivated* one deserves more.
 
 > **Say it in one line:** don't alert on errors, alert on how fast they're eating the
 > budget — and make a long and a short window agree first.

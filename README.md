@@ -36,7 +36,7 @@ A case study, not a codebase. This repo documents the architecture, the decision
 
 ## The one-paragraph version
 
-Two small products — a real-time multiplayer card game and a browser-only developer-utilities toolbox — run on a **single always-free ARM node** in a managed Kubernetes cluster. Everything around them is built the way a production system is built. The network, the cluster, and every machine identity are Terraform. The pipeline scans every image before it reaches the registry, signs and SBOMs the game's images, and refuses to call a deploy done until the pods are genuinely Ready. Postgres runs under an operator and streams its write-ahead log to object storage. Metrics, logs, and traces land in one pane, with error-budget burn-rate alerts on top. The game server drains in-flight hands on `SIGTERM` so elasticity never costs a player their game. It is small on purpose — and operated like it isn't.
+Two small products — a real-time multiplayer card game and a browser-only developer-utilities toolbox — run on a **single ARM node**, sized to sit inside the cloud's free monthly allowance, in a managed Kubernetes cluster. Everything around them is built the way a production system is built. The network, the cluster, and every machine identity are Terraform. The pipeline scans every image before it reaches the registry, signs and SBOMs the game's images, and refuses to call a deploy done until the pods are genuinely Ready. Postgres runs under an operator and streams its write-ahead log to object storage. Metrics, logs, and traces land in one pane, with error-budget burn-rate alerts on top. The game server drains in-flight hands on `SIGTERM` so elasticity never costs a player their game. It is small on purpose — and operated like it isn't.
 
 ## Twelve lines that survived contact with production
 
@@ -144,7 +144,7 @@ A portfolio that only lists wins is a portfolio you can't trust. This is the rea
 | --- | --- | --- |
 | 🟢 | IaC, CI/CD with scan + rollout gates, ingress + auto-renewing TLS, operator-run Postgres, WAL archiving, three-pillar observability, an external synthetic monitor, SLO rules and routing, pod autoscaling, graceful drain, image signing + SBOM (the game's two images), Pod Security Standards at `baseline` | **Live** |
 | 🟡 | GitOps with a metric-gated canary, default-deny network policies, the node autoscaler | **Authored and validated, deliberately off.** A canary needs a second pod the one baseline node can't fit; unenforced network policies would read as protection they don't provide. |
-| 🔴 | A rehearsed database restore, an alert that actually reached a human, the load test that right-sizes the autoscaler | **Not yet proven.** Backups are verified to write objects but no restore has been performed. Alert delivery is wired to a chat bot but has never fired in anger. The k6 test is written; the autoscaler's CPU target is still a committed placeholder. |
+| 🔴 | A rehearsed database restore, an alert that actually reached a human, the load test that right-sizes the autoscaler | **Not yet proven.** Backups are verified to write objects but no restore has been performed. A chat-bot alert receiver is authored, but it activates only when both its token *and* its chat id are configured — the chat id is unset, so alerts still land on the receiver that notifies nobody. The k6 test is written; the autoscaler's CPU target is still a committed placeholder. |
 
 > **Say it in one line:** built, staged, and unproven are three different words, and using them precisely is the whole discipline.
 
