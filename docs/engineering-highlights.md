@@ -247,6 +247,42 @@ logs, caused by an unquoted colon in a YAML string that invalidated the whole fi
 didn't run" and "it ran and failed" look different for a reason — a zero-second failure
 almost always means the file, not the code.
 
+**A Secret with two writers quietly erased half of itself.** The game bot's credential
+is the one Secret in the repo two different workflows write: a targeted activation job
+sets all three of its keys together, deliberately; the full platform-install job also
+touches it, to set just one of those keys as part of installing everything else. That
+second job used the standard idempotent-apply idiom —
+`kubectl create ... --dry-run=client -o yaml | kubectl apply -f -` — which looks like an
+update and is actually a **replacement**:
+
+```
+   the SECRET has three keys              the INSTALL job's own view of it
+   ------------------------               ---------------------------------
+   bot-token        (both jobs know)      --from-literal=bot-token=...
+   webhook-secret   (only the             (nothing -- this job has never
+   admin-ids         activation job        heard of these two keys)
+                      knows about)
+
+   `kubectl apply` of a bot-token-only object doesn't PATCH the existing
+   Secret -- it REPLACES it. Whatever this job doesn't know about, it deletes.
+```
+
+The install job runs for reasons that have nothing to do with Telegram — it installs
+the whole platform. Any time it happened to run *after* the activation job had set the
+fuller Secret, it silently deleted the other two keys. And the failure that produces is
+uniquely hard to catch: `big2-server` stayed up, correctly configured *not* to serve
+`/telegram/webhook` at all without a secret — which is the right behavior for a
+genuinely unconfigured deployment, and indistinguishable from one. No crash, no 5xx, no
+failed health check. Every bot feature behind that route — admin commands, inline mode,
+the passive chat archive — just stopped answering, for days, before anyone noticed.
+
+The fix reads the live Secret's existing keys back before writing, so the install job's
+own write can never again know less than the object it's touching. The follow-up
+mattered as much as the fix: a repo-wide grep for every Secret written from more than
+one workflow, to confirm this was the *only* one with the hazard, not just the only one
+that had been caught yet. **A green pod is not a green feature — the config a healthy
+process is reading can be silently wrong underneath it.**
+
 **A sixty-second proxy default was quietly ending games.** Players waiting at a table
 that hadn't filled would drop with a bare "Connection closed." in the UI and **no
 server-side error at all**, because nothing had failed on the server. The ingress closes
