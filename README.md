@@ -151,7 +151,7 @@ A portfolio that only lists wins is a portfolio you can't trust. This is the rea
 
 | | Capability | Status |
 | --- | --- | --- |
-| 🟢 | IaC, CI/CD with scan + rollout gates, ingress + auto-renewing TLS, operator-run Postgres, WAL archiving, three-pillar observability, an external synthetic monitor, SLO rules and routing, pod autoscaling, graceful drain, image signing + SBOM (the game's two images), Pod Security Standards at `baseline` | **Live** |
+| 🟢 | IaC, CI/CD with scan + rollout gates, ingress + auto-renewing TLS, operator-run Postgres, WAL archiving, three-pillar observability, an external synthetic monitor, SLO rules and routing, pod autoscaling, graceful drain, image signing + SBOM (the game's two images), Pod Security Standards at `baseline`, an admin dashboard on its own host and certificate, gated by the existing login | **Live** |
 | 🟡 | GitOps with a metric-gated canary, default-deny network policies, the node autoscaler | **Authored and validated, deliberately off.** A canary needs a second pod the one baseline node can't fit; unenforced network policies would read as protection they don't provide. |
 | 🔴 | A rehearsed database restore, an alert that actually reached a human, the load test that right-sizes the autoscaler | **Not yet proven.** Backups are verified to write objects but no restore has been performed. A chat-bot alert receiver is authored, but it activates only when both its token *and* its chat id are configured — the chat id is unset, so alerts still land on the receiver that notifies nobody. The k6 test is written; the autoscaler's CPU target is still a committed placeholder. |
 
@@ -253,6 +253,15 @@ Anything crossing a socket, a goroutine, a timer, or a database gets at least on
 GitOps with a metric-gated canary, default-deny network policies, and node autoscaling are authored and validated but switched **off**. Claiming less than you built beats a demo that looks live.
 
 </td></tr>
+<tr><td>
+
+**Reuse the login, don't build a second one**
+
+</td><td>
+
+The operator dashboard behind it doesn't get its own auth: it reuses the same one-time-link door players sign in with, plus an allow-list check re-run on *every* request rather than once at sign-in. A non-admin and a logged-out visitor get the identical `404` — a `403` would confirm the route exists at all. It also gets its own subdomain and its own certificate, so a not-yet-live host can never block renewal of the game's already-live one.
+
+</td></tr>
 </table>
 
 ## Bugs a real deployment surfaced
@@ -275,16 +284,18 @@ GitOps with a metric-gated canary, default-deny network policies, and node autos
 
 A green pipeline proves the API accepted a desired state. It does not prove anything works. What was actually checked:
 
-- ✅ every hostname returns `200` to a **standard** client, with no certificate-verification bypass
+- ✅ every player-facing hostname returns `200` to a **standard** client, with no certificate-verification bypass
 - ✅ the certificate issuer reads as the real authority, not the ingress placeholder
 - ✅ a **full round of the game** played end to end over a real secure WebSocket, with the outcome persisted to the database
 - ✅ an on-demand **backup verified to have written objects** to the bucket
+- ✅ the admin dashboard's host resolves, carries its own real certificate, and correctly returns `404` — not `200` — to a standard, unauthenticated request
 
 And what is deliberately *not* claimed:
 
 - ❌ no restore has ever been performed from those backups
 - ❌ no alert has ever been delivered to a human in anger
 - ❌ the load test that would right-size the autoscaler has not been run
+- ❌ "the admin dashboard correctly refuses a stranger" and "an admin has signed in and used it" are different claims, and only the first one is checked off here
 
 *A played hand beats a green check — and an unrehearsed restore is a hypothesis, not a backup.*
 

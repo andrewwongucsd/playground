@@ -958,6 +958,46 @@ different claims, and only the first one is true here.
 > **Say it in one line:** retire the endpoint, not just the UI — and when a flow
 > changes shape, check that the page it ends on still tells the truth.
 
+### The same door, gating a very different room
+
+Door 1 above already starts from "an allow-listed operator DMs the bot" — which is
+exactly the precondition an admin dashboard needs. So the operator console that lists
+players, inspects a wallet, and revokes a session or a token doesn't get its own login.
+It reuses the one-time-link door verbatim, on its own subdomain, with one addition: a
+second, independent check on every single request, not just at link-mint time.
+
+```
+   same link, same cookie, same session row  (Door 1, unchanged)
+                    |
+                    v
+   every admin request re-resolves the caller, THEN asks one more question:
+   is this account's Telegram id on the admin allow-list?
+                    |                                  |
+                 yes                                   no  (or not logged in at all)
+                    |                                  |
+                    v                                  v
+              the dashboard                      404 -- identical response
+                                                  either way, so a probe can't
+                                                  tell "wrong door" from
+                                                  "no door here"
+```
+
+Two details worth naming. First, the allow-list check runs on *every* request, not
+once at sign-in — a session that was valid and non-admin an hour ago is checked again
+right now, so there's no window where a stale cookie outlives a change to the
+allow-list. Second, an unauthenticated request and an authenticated-but-not-admin one
+get the *same* `404`, deliberately: a `403` would confirm to anyone probing the host
+that an admin route exists at all, which is one bit of information it costs nothing to
+withhold.
+
+The dashboard also sits on its own subdomain with its **own** certificate, not folded
+into the game's — the same "don't let a not-yet-live host block renewal of an
+already-live one" reasoning as the [TLS issuance](#tls-issuance-and-why-there-are-two-issuers)
+section above, applied to a second host instead of a second issuer.
+
+> **Say it in one line:** the safest new door is the one you don't build — reuse the
+> login you already trust, and add the one check that's actually new.
+
 ## Playing with the people you came with
 
 > **In plain English:** if you launch the game from a group chat, you should end up
