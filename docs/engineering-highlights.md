@@ -481,6 +481,20 @@ service can't become a slow join; a cache, so reconnects don't re-query; and a s
 "I don't know" return value that folds into the existing random-name default. Nothing
 downstream can tell the difference between "no answer" and "no attempt".
 
+**A login link that worked landed on a page that told you it hadn't.** The one-time
+link consumed the token, set the session cookie, and rendered a plain "you're logged
+in — close this tab and go back" page. That copy was correct while a *waiting* tab
+existed to return to; it stopped being true the day the delivery channel changed to a
+bot DM, so the tab the link opened was the only tab there ever was. The login worked
+every time. The screen it ended on told the user to go somewhere they had never been,
+and the natural response — click the link again — hit "invalid, expired, or already
+used", which is what actually generated every error report. The fix lands the same
+response that sets the cookie in a redirect into the app instead, over a 303 so
+nothing can replay the token as anything but the GET that consumed it. **A correct
+action nobody can observe is indistinguishable from a broken one** — and users
+respond to invisible success by retrying, which is what manufactures the visible
+failure.
+
 > **Say it in one line:** the failures worth writing down are the ones where
 > everything looked green.
 
@@ -564,13 +578,6 @@ Stating this is part of the engineering, not an apology for it.
 - **CPU is the wrong signal, knowingly.** Long-lived idle WebSocket connections barely
   move CPU, so it is a weak proxy for real load. The better signal is active rooms per
   pod, and the upgrade to it is staged in the file rather than pretended away.
-- **A login link still lands on a dead-end page.** The one-time link sets the session
-  correctly, then renders "you're logged in — close this tab and go back." That advice
-  was true when a waiting tab existed. It stopped being true the day links began
-  arriving as a bot DM, sending people back somewhere they had never been. The redirect
-  that fixes it is authored and sitting on a branch, unmerged. Nothing is broken about
-  the *auth*; the last screen just lies about what to do next, which is its own kind of
-  bug.
 - **The game client has no automated tests.** The pure client-side libraries in the
   other product are unit-tested, and the server's real-socket test verifies the wire
   protocol from the Go side. The browser client is verified by hand. That's a real gap,
