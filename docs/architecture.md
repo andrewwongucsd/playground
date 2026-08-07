@@ -860,17 +860,22 @@ capped by a product decision — practice scoring only — that is itself enforc
 API. If that decision ever changes, this one changes with it. Naming the trigger is
 what makes it a decision rather than an oversight.
 
-### One flow still ends on a page that lies
+### A flow that used to end on a page that lied
 
-This is the one thing on this page that is still wrong in production. Consuming a
-link renders a plain "you're logged in" page telling you to close the tab and go back
-to the one that asked — which made sense only while a waiting tab existed. Once links
-started arriving as a bot DM, that page began instructing people to return somewhere
-they had never been. The fix (the same response that sets the cookie also redirects
-into the app) is written and sitting on a branch; it is **not merged**, so the
-dead-end page is what a real user still hits. It is listed here rather than described
-as done, because a flow whose last step lies to the user is exactly the kind of thing
-a portfolio is tempted to quietly fix in prose first.
+Consuming a link used to render a plain "you're logged in" page telling you to close
+the tab and go back to the one that asked — which made sense only while a waiting tab
+existed. Once links started arriving as a bot DM, that page began instructing people
+to return somewhere they had never been: the tab it opened *was* the only tab there
+was.
+
+The fix landed the same response that sets the cookie in a redirect into the app
+instead — a 303, so nothing can be tempted to replay the one-time token as anything
+but the GET that consumed it. The `Set-Cookie` still applies to a redirect response,
+and the browser's follow-up is a top-level navigation, which `SameSite=Lax` permits,
+so the frontend's own "am I logged in?" check sees the session on first load. It is
+named here rather than folded silently into the feature list, because a flow whose
+last step used to lie to the user is exactly the kind of bug a portfolio is tempted to
+quietly fix in prose without saying so.
 
 ### Retiring a door properly
 
