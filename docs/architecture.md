@@ -65,20 +65,26 @@ every term used here.
 
 ## Start here: what this thing actually is
 
-> **In plain English:** two small websites and one small database, running on one
+> **In plain English:** a few small websites and one small database, running on one
 > rented computer — wrapped in all the machinery a real company would put around
 > them. The point was never the size of the app. It was operating it properly.
 
-Two products share one cluster:
+**Two products** are what this document is about:
 
 - **A multiplayer card game.** A Go server holds the rules and the live tables. A
   React page draws the table in your browser. The two talk over a **WebSocket** — a
   connection that stays open, so the server can push a card to you the instant
   someone plays it, instead of your browser asking "anything new?" over and over.
-- **A browser-only utilities toolbox.** Nine small tools that run entirely in your
+- **A browser-only utilities toolbox.** Ten small tools that run entirely in your
   browser. There is no backend at all; it is static files served by nginx.
 
-Both live behind one public entrance:
+**A third workload also lives on the cluster**, and it is named here so the capacity
+arithmetic later is honest: a small distributed-scheduler demo, built as a standalone
+learning artifact in its own repository and deployed onto this platform because the
+platform already existed. Its internals are out of scope for this document; its
+*footprint on the baseline node* is not.
+
+All three sit behind one public entrance:
 
 ```
                             the internet
@@ -93,26 +99,33 @@ Both live behind one public entrance:
               |  INGRESS -- reads the hostname and   |  TLS ends here
               |  the path, then picks a destination  |
               +--------------------------------------+
-                  |                            |
-        apex / www|                            | the game's hostname
-                  v                            v
-       +-------------------+     +--------------------------------+
-       | utilities toolbox |     | /ws /auth /telegram /queue     |
-       | React, no backend |     |               -> Go server     |
-       |                   |     | everything else -> React page  |
-       +-------------------+     +--------------------------------+
-                                                |
-                                                v
-                                          [ PostgreSQL ]
-                                          the only thing that
-                                          talks to the database
-                                          is the Go server
+             |                  |                    |
+   apex / www|      the game's  |          the demo's|
+             v         hostname v            hostname v
+   +-----------------+ +-----------------------+ +------------------+
+   | utilities       | | /ws /auth /telegram   | | scheduler demo   |
+   | toolbox         | | /queue -> Go server   | | (own repo, out   |
+   | React, no       | | everything else       | |  of scope here)  |
+   | backend         | |   -> the React page   | +------------------+
+   +-----------------+ +-----------------------+
+                                  |
+                                  v
+                            [ PostgreSQL ]
+                            the only thing that talks
+                            to the database is the
+                            game's Go server
 ```
 
-**One machine, on purpose.** The baseline is a single ARM node on a free shape. Every
-design decision below is shaped by that: there is rarely room for a second copy of
-anything, which is why several capabilities in this document are *authored but
-switched off* rather than claimed as live.
+Every hostname above resolves to that one balancer's IP, and each carries its own
+certificate issued by the same certificate manager — which is what makes "one public
+entry point" a literal statement rather than a simplification.
+
+**One machine, on purpose.** The baseline is a single ARM node on a free shape, and it
+is carrying all three of those workloads plus the database, the ingress controller, and
+the observability stack. Every design decision below is shaped by that: there is rarely
+room for a second copy of anything, which is why several capabilities in this document
+are *authored but switched off* rather than claimed as live. The third workload does not
+change that conclusion — it is one more reason for it.
 
 **Free shape, paid account — and the difference matters.** The node and the load
 balancer both use shapes the cloud provider gives away permanently. But the *account*
@@ -156,11 +169,18 @@ the description. Pods are cattle, everything finds everything else by label, and
 > and no login. It exists in this document because *where it runs* was a real
 > decision.
 
-The utilities toolbox is nine tools — a JSON/YAML editor, Base64 and JWT decoding, a
+The utilities toolbox is ten tools — a JSON/YAML editor, Base64 and JWT decoding, a
 regex tester, hashes and UUIDs, timestamps and cron, QR codes, a Markdown editor, a
-thumbnail grabber, an image converter. Every one runs client-side. Nothing is
-uploaded, which is the product's whole promise, and it means the entire "backend" is
-nginx serving static files.
+thumbnail grabber, an image converter, a meme/GIF generator. Every one runs
+client-side. Nothing is uploaded, which is the product's whole promise, and it means
+the entire "backend" is nginx serving static files.
+
+The meme generator is the sharpest test of that promise, because it is the one tool
+doing real work: sample frames from an uploaded video by seeking a `<video>` element
+onto a `<canvas>`, burn in captions and meme text, encode the result as a GIF —
+entirely with in-browser APIs, no `WebCodecs` dependency, so it runs the same in
+Safari as anywhere else. **No upload, no backend, same as the other nine** — the
+newest tool is the one that had the most reason to break that rule and didn't.
 
 ```
    THE GAME                         THE TOOLBOX
@@ -185,6 +205,31 @@ Its deployment is deliberately boring: one replica, an unprivileged nginx image,
 one detail that catches people out — the container listens on **8080, not 80**,
 because a non-root process cannot bind a port below 1024. That single line is what
 lets the whole pod run as a non-root user.
+
+### The same argument, applied a third time
+
+The scheduler demo landed here for the same reason, and it is worth being precise about
+what that does and doesn't say. It is a **standalone learning artifact** — its own
+repository, its own CI, its own README — and it is deliberately *not* part of this
+platform's story. It runs here because a working cluster with an ingress, a certificate
+manager, and a deploy pipeline already existed, so the marginal cost of one more
+hostname was close to zero.
+
+```
+   what it cost to add a third workload
+
+   a new vendor            ->  a new TLS setup, a new deploy story, a new
+                               place to look when something breaks
+
+   one more host on THIS   ->  a DNS record, an ingress rule, a certificate
+   cluster                    the existing manager issues automatically
+                               ... and a slice of the one baseline node
+```
+
+That last line is the honest half. The marginal *operational* cost was near zero; the
+marginal *capacity* cost was not, because the baseline node is the scarce resource this
+whole document keeps running into. A platform that makes adding things cheap will get
+things added — which is a good property right up until the node is full.
 
 > **Say it in one line:** one platform, one TLS story, one pipeline — a second vendor
 > is a second thing to operate, and it buys nothing for a static site.
@@ -994,6 +1039,69 @@ key configured the verifier is absent entirely, so everyone lands in the open qu
 rather than the server trusting a claim it cannot check. **Unverifiable input gets the
 least-privileged outcome, never the convenient one.**
 
+### The second thing that round trip fixed — and the bug it was built for
+
+The table key is one of the three signed round trips sharing that key. The second is
+sharper, because what rides on it is not seating but *money*: a player's own chip
+balance.
+
+`/ws` normally learns who is playing from the session cookie — but inside a Mini App
+on Telegram Desktop or Telegram Web, this server is loaded in an **iframe** on a
+`telegram.org` page. That makes it a third party, and a `SameSite=Lax` cookie is
+neither stored on login nor sent on the socket upgrade from inside one:
+
+```
+   INSIDE A MINI APP (Desktop / Web)         WHAT THE PLAYER SEES
+   --------------------------------          --------------------
+   telegram.org page
+     +-- iframe: this server         --      "Logged in" -- the client reads its
+          |                                  nickname straight out of the login
+          | POST /auth/telegram               response body, not the cookie
+          | response tries to                       |
+          | Set-Cookie ...                           v
+          |         X   THIRD-PARTY,           looks completely fine
+          |             SameSite=Lax
+          |             cookie DROPPED
+          v
+   WebSocket /ws upgrade
+     -- no cookie arrives --
+          |
+          v
+   seated as a GUEST, on a fresh random session id
+          |
+          v
+   wallet opens at StartingBalance -- EVERY SINGLE LAUNCH
+```
+
+That is the exact shape of the "Telegram players' points never accumulate" bug: not
+the wallet, not the scoring — an identity that silently failed to travel one hop
+further than the login response. Nothing errored. The login even *looked* right, which
+is what let it hide.
+
+The fix is the same shape as the table key: sign the identity server-side at login,
+hand it to the client, have the client echo it back on the socket upgrade the cookie
+never reaches. A client can't forge one, so it grants exactly the authority the cookie
+would have and no more — and because it doesn't ride in a cookie at all, it is immune
+to whatever a browser's cookie policy decides that day.
+
+**One property is unique to this token and worth naming.** Every other credential
+here expires or can be killed by hand: the session cookie in 30 days or on logout, a
+magic link on click or on `/revoke_tokens`. This one, unbounded, would stay valid until
+the bot token itself rotated — while it names an account on `/ws` and decides whose
+wallet a round settles into. So it carries its own issue time inside the signed
+payload, and a verifier-side max age (24h, matched to the Mini App's own initData
+freshness window) is
+non-negotiable in production. Generous on purpose: a launch mints one fresh token, but
+a tab can sit open far longer than that, and too short a window means a long-lived tab
+quietly drops back to a guest wallet mid-session — the identical silent failure this
+mechanism exists to prevent, just reintroduced by an overzealous expiry instead of a
+missing one.
+
+> **The pattern, stated once:** when a credential can't ride the transport it needs to
+> (a cookie a proxy strips, a cookie a third-party frame drops), sign it and hand the
+> round trip to the client instead — and anything with no natural expiry needs one
+> written into the payload, not assumed from context.
+
 ### Sorting players without trapping them
 
 ```
@@ -1021,6 +1129,59 @@ actually arrives. A modified client that reveals the button early achieves nothi
 
 > **Say it in one line:** a grouping key should be a preference with fallbacks, not a
 > partition — because never seating anyone is worse than seating them with strangers.
+
+### Talking to the table, and a feature check that lies
+
+Seated players can talk: a chat panel alongside the table, relayed by the server (not
+echoed by a client, so nobody can spoof another seat's line) and capped at 200
+characters both ends. Small on purpose — table talk, not a messaging app.
+
+The more interesting piece sits one layer earlier, in the composer: a mic button that
+lets a player dictate a line instead of typing it. `SpeechRecognition` is a real
+browser API, and the obvious way to offer the button is feature-detecting the
+constructor. That check **lies** on one platform that matters a great deal here: inside
+Telegram's iOS Mini App, `webkitSpeechRecognition` exists, reports itself supported,
+and then simply never produces a result — a documented WebKit bug in the exact engine
+this game's largest slice of mobile players sits inside.
+
+```
+   THE CHECK THAT LIES                    WHAT ACTUALLY HAPPENS ON iOS
+   --------------------                   -----------------------------
+   "window.webkitSpeechRecognition        recognition.start()
+    exists?" -- YES                            |
+        |                                      v
+        v                                 no onstart, no onaudiostart,
+   show the mic button                    often no event at ALL
+        |                                      |
+        v                                      v
+   player taps it, talks --            a mic button that is permanently
+   nothing happens, ever                dead, with no error to explain why
+```
+
+A capability check answers "does the API exist," not "does it work" — and on this one
+platform those are different questions with different answers. So availability here is
+decided by a **probe**, not a check: attempt recognition for real, and if the engine
+doesn't audibly come alive within 1.5 seconds — far past the few tens of milliseconds
+a working implementation takes — record that verdict and stop offering the button on
+that device. The verdict is written to `localStorage` rather than re-probed every
+render, because it is a property of the *browser engine*, not of one attempt: asking
+again on the next screen would just mean a dead button that times out freshly each
+time instead of never appearing at all.
+
+Nothing about this is required to play. The composer is a text input first and
+dictation is an accelerator on top of it — a player whose device fails the probe types,
+exactly as if the feature had never shipped. **A feature check that only asks "does the
+API exist" can pass on a browser where the feature doesn't actually work — probe the
+real behaviour, not its advertised name**, the same rule the [table-key
+MAC](#getting-the-chats-identity-from-one-connection-to-another) applies to a claim a
+client makes about itself: verify it, don't take its word.
+
+One more command belongs in this story for what it *doesn't* do: `/voice`, typed to the
+bot in a group chat, replies with directions to that group's own native Telegram voice
+chat. It doesn't start one — the Bot API has no method to, a voice call is a
+first-party Telegram feature this server can only point at, never operate. Naming that
+boundary is the honest version of "voice chat support": real directions to a real
+feature, not a facade over one this server doesn't run.
 
 ## The protocol, and why a modified client can't cheat
 
@@ -1696,9 +1857,33 @@ So a scheduled external probe checks the public endpoints and the certificate's
 expiry from outside that blast radius, and files an issue when they fail. It aims at
 `/queue` rather than `/`, because `/` is answered by the static frontend's nginx and
 would keep returning 200 with the game server dead — the probe has to fail when the
-thing you care about fails. On failure it opens **one** labelled issue and comments on
-it while the outage lasts, then comments and closes it on recovery: alert dedup with
-no alerting system.
+thing you care about fails.
+
+On failure it doesn't page on the first bad run. It takes **two consecutive**
+failures — because the runner executing the probe is its own failure domain, and a
+GitHub Actions outage (the job's runner never gets acquired) reads identically, from
+the alert, to a real site outage, but clears on its own within one cycle:
+
+```
+   1st failure                    2nd CONSECUTIVE failure         recovery
+   ------------                   ------------------------        --------
+   open a QUIET issue             ESCALATE that same issue        comment "recovered",
+   ("uptime-watch")               to PUBLIC + fail the run         close whichever
+   run stays green                ("uptime-alert")                 issue is open
+        |                                |                              |
+        v                                v                              v
+   holding for a blip          confirmed, not a blip            back to holding
+   confirmation next run       -- this is the page
+
+   one label lookup makes the whole thing idempotent: re-running the check
+   never opens a second issue for the same incident.
+```
+
+That two-step gate is a smaller version of the [SLO burn-rate rule](#slos-and-alerts-that-page-for-a-reason)
+just ahead — a long window and a short window both have to agree before anything
+pages — just implemented in twenty lines against the GitHub issues API instead of
+Prometheus rules. One labelled issue per incident, updated while it lasts and closed
+on recovery, either way: alert dedup with no alerting system.
 
 The two layers are complementary, not redundant: the inside view explains a problem,
 the outside view is the only one that can *notice* a total outage.
@@ -1936,9 +2121,8 @@ pods *and* a second app pod?" to "can it hold one more app pod?", which is the
 cheaper question and the one worth answering first. Git-as-source-of-truth is a
 genuinely separate win, and it is the half that needs the four pods.
 
-> **Say it in one line:** GitOps is a source-of-truth move, and a canary is only as
-> honest as its query — so handle no-data, know what your indicator can't see, and
-> when something is blocked on capacity, check which *half* of it is blocked.
+> **Say it in one line:** GitOps is a source-of-truth move and a canary is a safety
+> move — so when "it's blocked on capacity" comes up, check which *half* is blocked.
 
 ## Hardening: the supply chain, the pod, the network
 
@@ -2166,8 +2350,8 @@ The whole document, compressed. If you remember nothing else, remember these.
 
 **Getting changes out**
 
-20. GitOps is a source-of-truth move, and a canary is only as honest as its query — so
-    handle no-data, and know what your indicator can't see.
+20. GitOps is a source-of-truth move and a canary is a safety move — so when "it's
+    blocked on capacity" comes up, check which *half* is blocked.
 21. Sign the digest, declare what the image already is, and never apply a default-deny
     you can't test.
 22. An inconvenience became a forcing function — everything runs through pipelines,

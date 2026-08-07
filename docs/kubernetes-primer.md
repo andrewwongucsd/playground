@@ -1,4 +1,4 @@
-# Kubernetes, from zero
+# Kubernetes, from zero to usable
 
 A companion to [architecture.md](architecture.md). That document explains how one
 real system is built; this one explains the vocabulary it uses, assuming you have
@@ -8,36 +8,92 @@ Everything here is illustrated with that system's **real** configuration, trimme
 comments. Nothing is invented for teaching purposes, so when you finish this page you
 can read the architecture document — and the actual repository — without translating.
 
+This guide is intentionally repetitive in a good way: every major section ends with a
+single sentence you can memorize, so the whole platform stays in your head after one
+read.
+
+## How to use this guide (no background assumed)
+
+Use this exact sequence and do not skip steps:
+
+1. Read the mental-model block first: one idea, control plane, kubectl, nouns, and labels/selectors.
+2. Memorize the map: 1 idea -> 4 nouns -> 4 workload types -> 7 use cases.
+3. Read workload types and all seven use cases, and say each "Say it in one line" sentence out loud.
+4. Do the "First lab in 20 minutes" checklist immediately after the seven use cases.
+5. Read the surprise block last: storage, identity, secrets, network defaults, CRDs/operators, and packaging.
+
+If you get stuck, use this fallback loop:
+
+```
+confused -> find the nearest "Say it in one line"
+         -> map it to one noun (Pod / Service / Deployment)
+         -> return to the full section
+```
+
+## Memory map (the whole platform in one screen)
+
+```
+ONE IDEA
+  desired state loop
+
+FOUR NOUNS (nested)
+  Cluster -> Node -> Pod -> Container
+
+FOUR WORKLOAD CHOICES
+  Deployment | StatefulSet | DaemonSet | Job/CronJob
+
+SEVEN DAILY USE CASES
+  run | address | publish | config | health | size | update
+
+SIX SURPRISES
+  storage | identity | secrets | network defaults | CRDs/operators | packaging
+```
+
+## Common first-week mistakes (and fast fixes)
+
+- Mistake: debugging from pod names and IPs. Fix: debug from labels and Services.
+- Mistake: treating `Running` as healthy. Fix: trust readiness, not process state.
+- Mistake: setting `replicas` and HPA on the same workload. Fix: one owner per
+  number.
+- Mistake: adding default-deny policy without DNS allow. Fix: allow DNS first.
+- Mistake: assuming Secrets are encrypted. Fix: treat them as sensitive plaintext.
+
 ---
 
 ## Contents
 
+**Start here (no skip)**
+1. [How to use this guide](#how-to-use-this-guide-no-background-assumed)
+2. [Memory map](#memory-map-the-whole-platform-in-one-screen)
+3. [Common first-week mistakes](#common-first-week-mistakes-and-fast-fixes)
+
 **The mental model**
-1. [The one idea underneath everything](#the-one-idea-underneath-everything)
-2. [Who actually runs the loops: the control plane](#who-actually-runs-the-loops-the-control-plane)
-3. [How you talk to it: `kubectl`](#how-you-talk-to-it-kubectl)
-4. [The nouns, nested](#the-nouns-nested)
-5. [Labels, selectors, and annotations](#labels-selectors-and-annotations)
+4. [The one idea underneath everything](#the-one-idea-underneath-everything)
+5. [Who actually runs the loops: the control plane](#who-actually-runs-the-loops-the-control-plane)
+6. [How you talk to it: `kubectl`](#how-you-talk-to-it-kubectl)
+7. [The nouns, nested](#the-nouns-nested)
+8. [Labels, selectors, and annotations](#labels-selectors-and-annotations)
 
 **Choosing what to run**
-6. [The four kinds of workload](#the-four-kinds-of-workload--pick-by-how-the-thing-behaves)
+9. [The four kinds of workload](#the-four-kinds-of-workload--pick-by-how-the-thing-behaves)
 
 **The seven things people actually use it for**
-7. [Keep my program running](#use-case-1--keep-my-program-running)
-8. [Give it a stable address](#use-case-2--give-it-a-stable-address)
-9. [Let the internet reach it](#use-case-3--let-the-internet-reach-it)
-10. [Give it config and passwords](#use-case-4--give-it-config-and-passwords-without-baking-them-in)
-11. [Only send traffic when it's ready](#use-case-5--only-send-traffic-when-its-actually-ready)
-12. [Reserve the resources it needs](#use-case-6--reserve-the-resources-it-needs)
-13. [Update it without dropping anyone](#use-case-7--update-it-without-dropping-anyone)
+10. [Keep my program running](#use-case-1--keep-my-program-running)
+11. [Give it a stable address](#use-case-2--give-it-a-stable-address)
+12. [Let the internet reach it](#use-case-3--let-the-internet-reach-it)
+13. [Give it config and passwords](#use-case-4--give-it-config-and-passwords-without-baking-them-in)
+14. [Only send traffic when it's ready](#use-case-5--only-send-traffic-when-its-actually-ready)
+15. [Reserve the resources it needs](#use-case-6--reserve-the-resources-it-needs)
+16. [Update it without dropping anyone](#use-case-7--update-it-without-dropping-anyone)
+17. [First lab in 20 minutes](#first-lab-in-20-minutes-no-skipped-steps)
 
 **The parts that surprise people**
-14. [Storage: how a disposable pod keeps data](#storage-how-a-disposable-pod-keeps-data)
-15. [What identity does a pod run as?](#what-identity-does-a-pod-run-as)
-16. [Secrets are not encrypted](#secrets-are-not-encrypted)
-17. [The network starts wide open](#the-network-starts-wide-open)
-18. [Extending the API: custom resources and operators](#extending-the-api-custom-resources-and-operators)
-19. [Packaging: Helm, Kustomize, and overlays](#packaging-helm-kustomize-and-overlays)
+18. [Storage: how a disposable pod keeps data](#storage-how-a-disposable-pod-keeps-data)
+19. [What identity does a pod run as?](#what-identity-does-a-pod-run-as)
+20. [Secrets are not encrypted](#secrets-are-not-encrypted)
+21. [The network starts wide open](#the-network-starts-wide-open)
+22. [Extending the API: custom resources and operators](#extending-the-api-custom-resources-and-operators)
+23. [Packaging: Helm, Kustomize, and overlays](#packaging-helm-kustomize-and-overlays)
 
 **Reference**
 - [The pod states you will actually see](#the-pod-states-you-will-actually-see)
@@ -127,10 +183,11 @@ containers.
 
 Three consequences worth carrying forward:
 
-- **Nothing talks to anything except through the API server.** The scheduler doesn't
-  phone the kubelet. It writes "this pod goes on node B" into the API server, and the
-  kubelet on node B reads it. Every component is a loop watching the same database.
-  This is why RBAC on the API server is the whole security story.
+- **For control decisions, components coordinate through the API server.** The
+  scheduler doesn't phone the kubelet. It writes "this pod goes on node B" into the
+  API server, and the kubelet on node B reads it. Every control-plane component is a
+  loop watching the same database. This is why RBAC on the API server is a core part
+  of cluster security.
 - **The scheduler only *decides*; the kubelet *acts*.** They are separate loops that
   never speak directly. In the architecture document this is exactly why the pod
   autoscaler and node autoscaler can hand off to each other without knowing each
@@ -161,6 +218,15 @@ The handful of commands that cover most days:
    kubectl logs NAME               that container's stdout
    kubectl exec -it NAME -- sh     a shell inside the container
    kubectl delete pod NAME         delete it (a Deployment will replace it)
+```
+
+When debugging, use this fixed order so you do not waste time:
+
+```
+1) kubectl get       -> what exists
+2) kubectl describe  -> why it is in this state (Events is the gold mine)
+3) kubectl logs      -> what your process says
+4) kubectl exec      -> only if you truly need an interactive check
 ```
 
 **`describe` is the one beginners under-use.** Its `Events:` section at the bottom is
@@ -360,6 +426,11 @@ logs of everything running elsewhere — and missing logs look identical to no l
 
 ## Use case 1 — "keep my program running"
 
+Memory card:
+- Need: a process should run forever.
+- Object: Deployment.
+- First failure pattern: `CrashLoopBackOff` when your process exits.
+
 The most common thing anyone uses Kubernetes for, and the reason **Deployment** is the
 default answer among the four controllers above: a web server has no finish line, runs
 on whichever node has room, and any copy is as good as any other. You describe the
@@ -400,6 +471,11 @@ reset the count and fight the autoscaler, which then scales it back, forever.
 > the replica count, the manifest must not also state it.
 
 ## Use case 2 — "give it a stable address"
+
+Memory card:
+- Need: callers should not care when pods are replaced.
+- Object: Service.
+- First failure pattern: selector typo matches zero pods.
 
 Pods get a fresh IP every time they are replaced, so nothing can safely dial a pod
 directly. A **Service** is the stable name in front of them:
@@ -491,6 +567,11 @@ its default-deny policies.
 
 ## Use case 3 — "let the internet reach it"
 
+Memory card:
+- Need: one public entry point for many internal services.
+- Object: Ingress.
+- First failure pattern: TLS and timeout annotations missing for long-lived traffic.
+
 A `ClusterIP` Service is private. To publish it you add an **Ingress** — one public
 entrance that routes by hostname and path, and terminates HTTPS:
 
@@ -515,12 +596,31 @@ spec:
           - path: /                  # everything else -> the React page
 ```
 
+```
+internet user
+    |
+    v
+cloud load balancer (public IP)
+    |
+    v
+ingress controller pod
+    |
+    +--> path /ws, /auth, /queue -> Service A -> ready game-server pods
+    |
+    +--> path /                   -> Service B -> ready frontend pods
+```
+
 Two details in there are worth more than they look. `secretName` is filled in
 automatically by the certificate manager — you never paste a certificate. And
 `proxy-read-timeout: "3600"` is the fix for a real outage: the default is 60 seconds,
 which silently killed WebSockets belonging to players waiting at a table.
 
 ## Use case 4 — "give it config and passwords without baking them in"
+
+Memory card:
+- Need: same image in every environment, different runtime values.
+- Object: ConfigMap and Secret references.
+- First failure pattern: secret value committed to git by accident.
 
 The image must be identical in every environment, so anything environment-specific is
 injected at start-up. Plain values inline, sensitive values by reference:
@@ -537,12 +637,25 @@ env:
         optional: true               # missing -> the app runs without a DB
 ```
 
+```
+your image (immutable)
+    |
+    +--> plain env value from manifest: PORT=8080
+    |
+    +--> secretKeyRef -> Secret object -> key uri -> DATABASE_URL at startup
+```
+
 The database password never appears in this file, in git, or in anyone's terminal —
 the operator mints it directly into the cluster and this only names it. `optional:
 true` is the small touch that lets the same manifest run locally with no database at
 all.
 
 ## Use case 5 — "only send traffic when it's actually ready"
+
+Memory card:
+- Need: avoid sending users to half-started pods.
+- Object: readiness and liveness probes.
+- First failure pattern: database check in liveness causes restart storms.
 
 Two health checks that sound similar and do opposite things:
 
@@ -568,6 +681,11 @@ checks the database and `/healthz` does not — so a database outage quietly rem
 pod from rotation instead of killing it.
 
 ## Use case 6 — "reserve the resources it needs"
+
+Memory card:
+- Need: predictable scheduling and safe CPU/memory ceilings.
+- Object: `requests` and `limits`.
+- First failure pattern: pod stays `Pending` because requests do not fit any node.
 
 ```yaml
 resources:
@@ -605,6 +723,11 @@ with `OOMKilled` in its status. CPU is elastic; memory is a wall.
 
 ## Use case 7 — "update it without dropping anyone"
 
+Memory card:
+- Need: deploy a new version while the old one still serves.
+- Object: Deployment rolling update.
+- First failure pattern: rollout hangs because there is no spare capacity.
+
 A rolling update replaces pods gradually instead of all at once:
 
 ```
@@ -637,6 +760,39 @@ spare capacity, a rolling update cannot start — it hangs rather than failing c
 
 > **Say it in one line:** those seven cover almost everything — run it, address it,
 > publish it, configure it, health-check it, size it, and update it safely.
+
+## First lab in 20 minutes (no skipped steps)
+
+Goal: build one tiny service, publish it inside the cluster, then safely update it.
+
+```
+step 1  create a namespace
+step 2  apply one Deployment (1 pod)
+step 3  apply one Service (stable name)
+step 4  verify with kubectl get and kubectl describe
+step 5  add readiness and liveness probes
+step 6  add requests and limits
+step 7  scale from 1 to 2 replicas and verify load-balancing
+step 8  change image tag and watch a rolling update complete
+```
+
+Suggested command sequence:
+
+```
+kubectl create namespace demo
+kubectl apply -n demo -f deployment.yaml
+kubectl apply -n demo -f service.yaml
+kubectl get pods,svc -n demo
+kubectl describe pod <name> -n demo
+kubectl set image deployment/myapp myapp=myapp:v2 -n demo
+kubectl rollout status deployment/myapp -n demo
+```
+
+If any step fails, return to this fixed debug loop:
+
+```
+get -> describe -> events -> logs
+```
 
 ## Storage: how a disposable pod keeps data
 
@@ -689,9 +845,8 @@ detached from the old node before it can attach to the new one. When the old nod
 unreachable, that detach waits for a timeout — which is why a *forced* stateful
 migration in that project cost about six minutes rather than seconds.
 
-> **Say it in one line:** storage is a separate object with a separate lifetime, and
-> the pod only borrows it — which is why the data outlives the pod, and why a pod
-> holding a volume can't move as freely as one that doesn't.
+> **Say it in one line:** storage is a separate object with its own lifetime and the
+> pod only borrows it — which is why the data outlives the pod that wrote it.
 
 ## What identity does a pod run as?
 
@@ -800,8 +955,7 @@ whose plugin ignores policies and you have a YAML file that reads like protectio
 provides none, which is worse than having nothing.
 
 > **Say it in one line:** every pod can reach every pod until you say otherwise — so
-> default-deny is the starting move, allowing DNS is the step everyone forgets, and an
-> unenforced policy is a comforting lie.
+> default-deny is the starting move, and an unenforced policy is a comforting lie.
 
 ## Extending the API: custom resources and operators
 
@@ -858,8 +1012,7 @@ check whether an operator already exists before hand-rolling manifests and inher
 every operational problem yourself.
 
 > **Say it in one line:** a CRD adds a noun and an operator gives it meaning — which
-> is how you write "I want a Postgres cluster" and get backups, point-in-time
-> recovery, and safe upgrades along with it.
+> is how "I want a Postgres cluster" becomes one you can actually operate.
 
 ## Packaging: Helm, Kustomize, and overlays
 

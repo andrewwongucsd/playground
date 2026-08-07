@@ -45,7 +45,7 @@ the links to check that it is real.</sub>
 
 ## The one-paragraph version
 
-Two small products — a real-time multiplayer card game and a browser-only developer-utilities toolbox — run on a **single ARM node**, sized to sit inside the cloud's free monthly allowance, in a managed Kubernetes cluster. Everything around them is built the way a production system is built. The network, the cluster, and every machine identity are Terraform. The pipeline scans every image before it reaches the registry, signs and SBOMs the game's images, and refuses to call a deploy done until the pods are genuinely Ready. Postgres runs under an operator and streams its write-ahead log to object storage. Metrics, logs, and traces land in one pane, with error-budget burn-rate alerts on top. The game server drains in-flight hands on `SIGTERM` so elasticity never costs a player their game. It is small on purpose — and operated like it isn't.
+Two small products — a real-time multiplayer card game and a browser-only developer-utilities toolbox — plus a standalone scheduler demo, all run on a **single ARM node** sized to sit inside the cloud's free monthly allowance, in a managed Kubernetes cluster. Everything around them is built the way a production system is built. The network, the cluster, and every machine identity are Terraform. The pipeline scans every image before it reaches the registry, signs and SBOMs the game's images, and refuses to call a deploy done until the pods are genuinely Ready. Postgres runs under an operator and streams its write-ahead log to object storage. Metrics, logs, and traces land in one pane, with error-budget burn-rate alerts on top. The game server drains in-flight hands on `SIGTERM` so elasticity never costs a player their game. It is small on purpose — and operated like it isn't.
 
 ## Twelve lines that survived contact with production
 
@@ -161,8 +161,8 @@ A portfolio that only lists wins is a portfolio you can't trust. This is the rea
 
 | Product | What it is | Stack |
 | --- | --- | --- |
-| 🃏 **Multiplayer card game** | Real-time [Big Two](https://en.wikipedia.org/wiki/Big_two) — a pure rules engine, a WebSocket server with matchmaking and bot fill-in, a browser table UI. Two passwordless login paths, a bilingual interface, and a speech-synthesis dealer that calls each play aloud. Practice scoring only, no wagering. | Go · React · TypeScript |
-| 🧰 **Developer utilities toolbox** | Nine browser-only tools: JSON/YAML tree editor, Base64/URL/JWT, regex tester, hash & UUID, timestamp & cron, QR codes, a WYSIWYG Markdown editor, a thumbnail grabber, an image converter. Every one runs entirely client-side — nothing uploaded. | React · TypeScript |
+| 🃏 **Multiplayer card game** | Real-time [Big Two](https://en.wikipedia.org/wiki/Big_two) — a pure rules engine, a WebSocket server with matchmaking and bot fill-in, a browser table UI. Two passwordless login paths, table chat with speech-to-text dictation, a bilingual interface, and a speech-synthesis dealer that calls each play aloud. Practice scoring only, no wagering. | Go · React · TypeScript |
+| 🧰 **Developer utilities toolbox** | Ten browser-only tools: JSON/YAML tree editor, Base64/URL/JWT, regex tester, hash & UUID, timestamp & cron, QR codes, a WYSIWYG Markdown editor, a thumbnail grabber, an image converter, a meme/GIF generator. Every one runs entirely client-side — nothing uploaded. | React · TypeScript |
 
 <div align="center">
 
@@ -172,7 +172,7 @@ A portfolio that only lists wins is a portfolio you can't trust. This is the rea
 
 </div>
 
-Two product details worth their own line, because both were judgement calls rather than features:
+Three product details worth their own line, because each was a judgement call rather than a feature:
 
 - **No passwords anywhere.** Two doors — an operator-issued one-time link and a signed chat-platform mini-app payload — converge on one session cookie set in exactly one place. Nothing to hash, rate-limit, or leak, because there is no password.
 - **The interface speaks the player's language.** A second locale in the game's *colloquial* register, auto-selected from the device's own signals with a manual override — and the dealer reads each play aloud through the browser's speech synthesis, with no audio files and no network call.
@@ -269,6 +269,7 @@ GitOps with a metric-gated canary, default-deny network policies, and node autos
 - **📡 A Ready pod can still be wired wrong.** A trace datasource was pointed at the log store's port. The install was green, the pod was Ready, and every query returned nothing. Confirm ports from the resource, not from muscle memory.
 - **🧠 A pillar that was "installed" for eight days had never once stayed up.** Tempo was `OOMKilled` on a 512Mi memory limit — **2,251 restarts** before anyone looked. Its own logs were no help: it started cleanly every time, brought up every module, opened every receiver, and was then killed by the kubelet, so nothing in them said *out of memory*; only `lastState.terminated.reason` did. The install had reported success, so the traces pillar read as done for its entire life. Then the fix wouldn't land either: **a StatefulSet's rolling update will not replace a pod that is already unhealthy**, so raising the limit changed nothing a pod that was never recreated could act on — `helm --wait` sat there and timed out while the restart count climbed on the same eight-day-old pod. Deleting it was the fix. Two lessons, one bug: *installed is not running*, and *a crashlooping StatefulSet has to be pushed, not patched*.
 - **🧵 A flaky test where both outcomes were correct.** A test asserted the server drops an oversized frame — but the client's write and the server's close are two ends of one socket racing. Either side can win, and *both* prove the cap held. The test was accepting one of two correct answers.
+- **🔑 A Secret with two writers erased half of itself.** One install workflow rewrote the game bot's credential with `kubectl create --dry-run | apply` — which *replaces* an object, not merges it — silently deleting the two keys a *different* workflow had set. Every bot feature behind it (admin commands, inline mode, the chat archive) died together, for days, with no error a health check would ever see: the server was correctly running, just correctly configured wrong. Fixed by reading the live keys back before overwriting them — and by grep-auditing every other Secret in the repo for the same two-writer shape.
 
 ## How "done" was verified — and what isn't
 
