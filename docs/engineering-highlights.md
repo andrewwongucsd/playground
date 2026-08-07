@@ -126,10 +126,13 @@ user gets a 500 and the link is already burned. That is the same class of bug th
 transaction was written to prevent, arriving one step later. Small window, small blast
 radius, and listed here rather than left to read as solved.
 
-Where a consumed link *lands* is the other loose end: it still renders a "you're logged
-in" page telling you to return to the tab that asked — which stopped being true the
-day links started arriving as a DM. The redirect that fixes it is written but not
-merged, so it is listed under what isn't proven rather than claimed here.
+Where a consumed link *lands* was the other loose end: it used to render a "you're
+logged in" page telling you to return to the tab that asked — which stopped being true
+the day links started arriving as a DM, so the tab the link opened was the only tab
+there ever was. That shipped a real, if quiet, bug: a correct login that told the user
+to go back to a tab that didn't exist. See
+[Bugs a real deployment surfaced](#bugs-a-real-deployment-surfaced) for how it surfaced
+and the redirect that fixed it.
 
 **Sign the state you hand to a client, and fail closed when you can't check it.**
 Two places needed a secret that isn't a session. A matchmaking key is proved on one
