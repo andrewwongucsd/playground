@@ -690,26 +690,26 @@ Memory card:
 ```yaml
 resources:
   requests:                     # a RESERVATION -- used for scheduling
-    cpu: 50m                    # 50 millicores = 5% of one core
-    memory: 32Mi
-  limits:                       # a CEILING -- exceed it and you're throttled/killed
-    cpu: 250m
+    cpu: 100m                   # 100 millicores = 10% of one core
     memory: 128Mi
+  limits:                       # a CEILING -- exceed it and you're throttled/killed
+    cpu: "1"
+    memory: 512Mi
 ```
 
 **`requests` is the single most misunderstood field in Kubernetes.** It is not what
 your program uses; it is what the scheduler *sets aside* for it. A node with 1 core
-fits twenty pods requesting `50m` each — even if all twenty sit completely idle, and
+fits ten pods requesting `100m` each — even if all ten sit completely idle, and
 even if one of them is actually burning 200m. The scheduler does arithmetic on the
 requests, not on reality.
 
 ```
    NODE: 1000m CPU total
    +--------------------------------------------------------------+
-   | requested: 950m                              | free: 50m     |
+   | requested: 900m                              | free: 100m    |
    +--------------------------------------------------------------+
                                                         ^
-   A new pod requesting 100m does NOT fit here, no matter how idle
+   A new pod requesting 200m does NOT fit here, no matter how idle
    the node actually is. It goes Pending and waits -- forever, if
    nothing frees up.
 ```
