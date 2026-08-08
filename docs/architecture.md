@@ -175,6 +175,14 @@ thumbnail grabber, an image converter, a meme/GIF generator. Every one runs
 client-side. Nothing is uploaded, which is the product's whole promise, and it means
 the entire "backend" is nginx serving static files.
 
+The thumbnail grabber is also reachable by URL directly — `/thumbnail-grabber/<a
+YouTube link or bare video id>` loads the tool prefilled and shows the thumbnails
+immediately, no pasting required. Once a video id parses, the address bar rewrites
+itself down to that canonical short form (`history.replaceState`, so it doesn't spam
+the back button), so every URL shape a video could be pasted as — `watch?v=`,
+`youtu.be`, `embed`, with or without tracking params — collapses to the one URL for
+that video rather than splitting bookmarks across variants.
+
 The meme generator is the sharpest test of that promise, because it is the one tool
 doing real work: sample frames from an uploaded video by seeking a `<video>` element
 onto a `<canvas>`, burn in captions and meme text, encode the result as a GIF —
