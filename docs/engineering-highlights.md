@@ -669,6 +669,18 @@ Stating this is part of the engineering, not an apology for it.
   consumption and account resolution are atomic, but the session insert that follows is
   not, so a failure there burns a link for good. Small window, small blast radius, and
   an unambiguous fix — move the insert inside the transaction — that hasn't been made.
+- **The toolbox's meme generator growing a server dependency — authored, not merged,
+  not deployed.** It's currently a fully client-side tool (a video file in, a captioned
+  GIF out). A branch reworks the input side to accept a YouTube link instead, fetched
+  through a new endpoint on the game server (reusing its existing `yt-dlp`-backed
+  downloader) rather than a browser fetch — YouTube's stream can't be read directly
+  client-side. That's a real exception to "every tool here runs entirely client-side,"
+  worth being precise about, and it exists on a feature branch only: not on `main`, not
+  built into a deployed image, and never exercised against a real download in this
+  environment's network. A mislabeled-`Content-Type` bug was caught reviewing it — the
+  production base image doesn't ship the OS files a stdlib MIME lookup silently depends
+  on — which is a smaller, earlier win than the bugs above: found before anything
+  shipped, not surfaced by a real deployment.
 
 > **Say it in one line:** an untested backup, an unfired alert, and an unrun load
 > test are three hypotheses — and calling them anything else is how outages get
