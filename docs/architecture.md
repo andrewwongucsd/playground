@@ -998,6 +998,69 @@ section above, applied to a second host instead of a second issuer.
 > **Say it in one line:** the safest new door is the one you don't build — reuse the
 > login you already trust, and add the one check that's actually new.
 
+### A cookie proves who; it doesn't prove why
+
+The allow-list check above answers "is this person an admin?" It doesn't answer a
+different question a session cookie can't answer on its own: *did this admin actually
+mean to send this particular request?* A cookie is attached by the browser
+automatically, to any request aimed at the host it belongs to — including one embedded
+in a page the admin never meant to trust, sitting open in another tab. That's
+**cross-site request forgery**: a forged action, riding a real, already-authenticated
+session, that the admin never asked for.
+
+```
+   an admin, logged in, browsing an unrelated page in another tab
+                    |
+                    v
+   that page contains a form aimed at the dashboard's "revoke session" route
+                    |
+                    v
+   the browser attaches the admin's cookie automatically -- it always does,
+   for any request to that host, regardless of which tab or page sent it
+                    |
+                    v
+   the allow-list check above says "yes, this is a real admin session" -- true!
+   it just isn't the admin's own intent being expressed
+```
+
+The fix asks for one more thing a forging page structurally cannot produce: the same
+random value, delivered to the browser two independent ways — once as a cookie, once
+baked into the real dashboard page as a hidden field — with the state-changing request
+required to carry both and required to match. A forged request can make the browser
+attach the cookie automatically; it has no way to *read* that cookie's value (a
+different origin can't), so it can never also supply the matching field. Both together,
+only from the real page, is the whole defense.
+
+This is the standard **double-submit cookie** pattern, chosen over the alternative
+(binding a signed, session-specific token) for a reason that shows up everywhere else
+in this build too: it needed no new secret to generate, store, or rotate — just a
+second random value compared against itself, the same trust model the login session
+itself already uses.
+
+**The honest part of this story is which copy got fixed.** The dashboard's move to its
+own standalone service ([above](#the-same-argument-applied-a-third-time)) stands the
+new copy up *before* cutting real traffic to it, on purpose — so nothing breaks for
+players mid-migration. That means, for a while, **two** copies of the same dashboard
+code exist: a new one that isn't live yet, and an old one, still embedded in the game
+server's own process, that is. Fixing only the new copy would have hardened a service
+nobody was using and left the one actually reachable exactly as it was. Both got fixed,
+the same day, for the same reason the old one is still there at all: it's still the one
+in front of real traffic.
+
+**One more narrowing, on the same pass.** The dashboard's database access was scoped
+down too — not a fourth Terraform-provisioned identity like the [three
+above](#identity-three-rings-and-three-keys), but the same *principle* applied one
+layer down, inside Postgres itself: a role that can read what the dashboard needs to
+show and delete exactly two things (a revoked session, a spent login link), created and
+password-managed declaratively by the database operator rather than sharing the game
+server's own full read-write-migrate role. The database can't tell "the dashboard" and
+"the game server" apart by network path alone — only by which credential shows up at
+the connection — so the credential itself has to be the boundary.
+
+> **Say it in one line:** a session cookie proves *who's* asking, not *why* — a
+> state-changing action needs something a forged request structurally cannot produce,
+> and a service mid-migration is only as safe as whichever copy is actually live.
+
 ## Playing with the people you came with
 
 > **In plain English:** if you launch the game from a group chat, you should end up
@@ -2360,41 +2423,44 @@ The whole document, compressed. If you remember nothing else, remember these.
    the page it ends on still tells the truth.
 10. A grouping key should be a preference with fallbacks, not a partition — because
     never seating anyone is worse than seating them with strangers.
+11. A session cookie proves *who's* asking, not *why* — a state-changing action needs
+    something a forged request structurally cannot produce, and a service
+    mid-migration is only as safe as whichever copy is actually live.
 
 **The game itself**
 
-11. The strongest anti-cheat is data the client never received — so send each seat only
+12. The strongest anti-cheat is data the client never received — so send each seat only
     its own hand, and re-validate every move anyway.
-12. Derive the server URL from the page's own origin and one built image runs anywhere
+13. Derive the server URL from the page's own origin and one built image runs anywhere
     — and a best-effort feature that degrades to silence never needs an error path.
 
 **Keeping it up**
 
-13. Rehearse on staging, because production rate limits are per-domain, per-week, and
+14. Rehearse on staging, because production rate limits are per-domain, per-week, and
     there's no appeal.
-14. A snapshot restores to one instant and the log restores to any instant — but an
+15. A snapshot restores to one instant and the log restores to any instant — but an
     untested backup is still only a hypothesis.
-15. Staying up beats staying consistent-or-dead — when the failure is recoverable at
+16. Staying up beats staying consistent-or-dead — when the failure is recoverable at
     human speed and the alternative is a permanent crash loop.
-16. A pod autoscaler reshuffles capacity and only nodes create it — so the `max` on the
+17. A pod autoscaler reshuffles capacity and only nodes create it — so the `max` on the
     node pool is the real cost control.
 
 **Knowing what it's doing**
 
-17. Monitoring that shares a failure domain with the thing it monitors will go quiet
+18. Monitoring that shares a failure domain with the thing it monitors will go quiet
     exactly when you need it loudest.
-18. Don't alert on errors, alert on how fast they're eating the budget — and make a
+19. Don't alert on errors, alert on how fast they're eating the budget — and make a
     long and a short window agree first.
-19. A fake agrees with your assumptions and a real socket doesn't — so test every
+20. A fake agrees with your assumptions and a real socket doesn't — so test every
     boundary against the real thing, and draw the gaps you haven't covered.
 
 **Getting changes out**
 
-20. GitOps is a source-of-truth move and a canary is a safety move — so when "it's
+21. GitOps is a source-of-truth move and a canary is a safety move — so when "it's
     blocked on capacity" comes up, check which *half* is blocked.
-21. Sign the digest, declare what the image already is, and never apply a default-deny
+22. Sign the digest, declare what the image already is, and never apply a default-deny
     you can't test.
-22. An inconvenience became a forcing function — everything runs through pipelines,
+23. An inconvenience became a forcing function — everything runs through pipelines,
     which is how a team would have done it anyway.
 
 ---
