@@ -1061,6 +1061,44 @@ the connection — so the credential itself has to be the boundary.
 > state-changing action needs something a forged request structurally cannot produce,
 > and a service mid-migration is only as safe as whichever copy is actually live.
 
+### One link that actually lands where it says it will
+
+A smaller, older rough edge got closed the same week: the admin-only bot command that
+mints a login link always sent the browser into the *game*, never the dashboard — an
+operator had to already know to type the second URL by hand afterward. Asking for an
+admin credential and landing somewhere else isn't a security problem, but it's exactly
+the kind of gap that reads as broken the first time someone hits it.
+
+The fix is a **second** bot command, not a flag on the first one. Same token, same
+table, same one-time-use guarantee — the only difference is which URL it's wrapped in,
+decided by *which command was typed*, not by anything in the link itself:
+
+```
+   admin DMs the bot: /generate_token             admin DMs the bot: /generate_dashboard_token
+        |                                               |
+        v                                               v
+   link ends at the GAME's verify route         link ends at a SECOND, dedicated verify route
+        |                                               |
+        v                                               v
+   consumes the token, sets the session,        consumes the token, sets the session,
+   sends the browser into the game               sends the browser into the admin dashboard
+```
+
+**Why a second route, not a `?destination=` on the first one.** The tempting shortcut —
+one verify endpoint, a query parameter picking where it sends you afterward — creates a
+destination an attacker's request could influence. That's the textbook shape of an
+**open redirect**: a link that looks like it points at your own site but silently hands
+the browser somewhere else the moment a parameter is trusted too far. Two routes, each
+with its landing spot fixed in the server's own configuration rather than read from the
+request, closes that off structurally — there is no string arriving from outside that
+either route ever treats as "go here." The cost is one small handler, once. The
+alternative would have been an ongoing promise to validate a redirect parameter
+perfectly, forever.
+
+> **Say it in one line:** the safest way to avoid validating a redirect target is to
+> never accept one — fix the destination in the code that runs, not in anything that
+> arrives with the request.
+
 ## Playing with the people you came with
 
 > **In plain English:** if you launch the game from a group chat, you should end up
@@ -2426,41 +2464,44 @@ The whole document, compressed. If you remember nothing else, remember these.
 11. A session cookie proves *who's* asking, not *why* — a state-changing action needs
     something a forged request structurally cannot produce, and a service
     mid-migration is only as safe as whichever copy is actually live.
+12. The safest way to avoid validating a redirect target is to never accept one — fix
+    the destination in the code that runs, not in anything that arrives with the
+    request.
 
 **The game itself**
 
-12. The strongest anti-cheat is data the client never received — so send each seat only
+13. The strongest anti-cheat is data the client never received — so send each seat only
     its own hand, and re-validate every move anyway.
-13. Derive the server URL from the page's own origin and one built image runs anywhere
+14. Derive the server URL from the page's own origin and one built image runs anywhere
     — and a best-effort feature that degrades to silence never needs an error path.
 
 **Keeping it up**
 
-14. Rehearse on staging, because production rate limits are per-domain, per-week, and
+15. Rehearse on staging, because production rate limits are per-domain, per-week, and
     there's no appeal.
-15. A snapshot restores to one instant and the log restores to any instant — but an
+16. A snapshot restores to one instant and the log restores to any instant — but an
     untested backup is still only a hypothesis.
-16. Staying up beats staying consistent-or-dead — when the failure is recoverable at
+17. Staying up beats staying consistent-or-dead — when the failure is recoverable at
     human speed and the alternative is a permanent crash loop.
-17. A pod autoscaler reshuffles capacity and only nodes create it — so the `max` on the
+18. A pod autoscaler reshuffles capacity and only nodes create it — so the `max` on the
     node pool is the real cost control.
 
 **Knowing what it's doing**
 
-18. Monitoring that shares a failure domain with the thing it monitors will go quiet
+19. Monitoring that shares a failure domain with the thing it monitors will go quiet
     exactly when you need it loudest.
-19. Don't alert on errors, alert on how fast they're eating the budget — and make a
+20. Don't alert on errors, alert on how fast they're eating the budget — and make a
     long and a short window agree first.
-20. A fake agrees with your assumptions and a real socket doesn't — so test every
+21. A fake agrees with your assumptions and a real socket doesn't — so test every
     boundary against the real thing, and draw the gaps you haven't covered.
 
 **Getting changes out**
 
-21. GitOps is a source-of-truth move and a canary is a safety move — so when "it's
+22. GitOps is a source-of-truth move and a canary is a safety move — so when "it's
     blocked on capacity" comes up, check which *half* is blocked.
-22. Sign the digest, declare what the image already is, and never apply a default-deny
+23. Sign the digest, declare what the image already is, and never apply a default-deny
     you can't test.
-23. An inconvenience became a forcing function — everything runs through pipelines,
+24. An inconvenience became a forcing function — everything runs through pipelines,
     which is how a team would have done it anyway.
 
 ---
