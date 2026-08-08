@@ -534,6 +534,42 @@ action nobody can observe is indistinguishable from a broken one** — and users
 respond to invisible success by retrying, which is what manufactures the visible
 failure.
 
+**Security headers were declared once and delivered almost nowhere.** The static
+frontend's web server sets three response headers meant to apply to everything it
+serves. They were written exactly once, at the top level, on the reasonable-looking
+assumption that "declared for the whole server" means "present on every response." It
+doesn't: the two routing rules that actually matched nearly all real traffic — the
+hashed asset files, and the fallback that every client-side route resolves to — each
+set one header of their own for caching, and a rule that sets its own header for
+*anything* silently replaces the *entire* inherited set for that request, not just the
+one header it meant to add. The result: the one response type these headers were
+least likely to reach was the one nearly every real visitor actually got.
+
+```
+   headers declared ONCE, at server scope
+        |
+        v
+   "public, immutable, cache forever"      <- more specific rule, hashed assets
+        (declares its OWN header)              inherited set: silently GONE
+        |
+   "no-cache, always revalidate"           <- more specific rule, the page shell
+        (declares its OWN header)              inherited set: silently GONE
+        |
+        v
+   only a request matching NEITHER rule still carries the three headers --
+   for a single-page app, that's nearly nothing
+```
+
+Confirmed live, not assumed: spinning up the exact same base image with the
+original config and asking it directly (a plain HTTP HEAD request) showed zero of
+the three headers on either an asset or a page load. The fix repeats all three
+headers inside both of the more specific rules — three lines, twice, rather than
+one shared declaration nothing actually reached. **A config's *scope* and a
+response's *actual* headers are two different claims** — the first describes
+intent, the second is the only one a browser ever receives, and a routing rule
+with an opinion of its own silently overrides the general one instead of adding
+to it.
+
 > **Say it in one line:** the failures worth writing down are the ones where
 > everything looked green.
 
