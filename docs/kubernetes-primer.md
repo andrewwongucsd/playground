@@ -91,9 +91,10 @@ SIX SURPRISES
 18. [Storage: how a disposable pod keeps data](#storage-how-a-disposable-pod-keeps-data)
 19. [What identity does a pod run as?](#what-identity-does-a-pod-run-as)
 20. [Secrets are not encrypted](#secrets-are-not-encrypted)
-21. [The network starts wide open](#the-network-starts-wide-open)
-22. [Extending the API: custom resources and operators](#extending-the-api-custom-resources-and-operators)
-23. [Packaging: Helm, Kustomize, and overlays](#packaging-helm-kustomize-and-overlays)
+21. [Pulling a private image](#pulling-a-private-image-imagepullsecrets)
+22. [The network starts wide open](#the-network-starts-wide-open)
+23. [Extending the API: custom resources and operators](#extending-the-api-custom-resources-and-operators)
+24. [Packaging: Helm, Kustomize, and overlays](#packaging-helm-kustomize-and-overlays)
 
 **Reference**
 - [The pod states you will actually see](#the-pod-states-you-will-actually-see)
@@ -914,6 +915,77 @@ What actually protects a Secret is everything *around* it:
 
 > **Say it in one line:** a Secret is base64, not encrypted — what protects it is
 > RBAC and never having written it down in the first place.
+
+## Pulling a private image: `imagePullSecrets`
+
+Memory card:
+- Need: the kubelet has to authenticate to a registry to pull an image that isn't public.
+- Object: a Secret of type `kubernetes.io/dockerconfigjson`, referenced by name.
+- First failure pattern: `ImagePullBackOff` because the Secret is missing, wrong namespace, or the token expired.
+
+A public image (this platform's game server, for example) needs no credential —
+anyone can `docker pull` it. A **private** package on a registry like GHCR
+(GitHub Container Registry) is different: the kubelet needs something to
+authenticate with, the same way your laptop needs `docker login` before it can
+pull one by hand. That "something" is a Secret, referenced by name on the Pod
+spec:
+
+```yaml
+spec:
+  imagePullSecrets:
+    - name: ghcr-pull                # a Secret, type kubernetes.io/dockerconfigjson
+  containers:
+    - name: admin-server
+      image: ghcr.io/example-owner/admin-server:sha-abc1234
+```
+
+```
+   kubectl create secret docker-registry ghcr-pull \
+     --docker-server=ghcr.io --docker-username=<anything-non-empty> \
+     --docker-password=<a PAT scoped to read:packages ONLY>
+        |
+        v
+   Secret ghcr-pull (namespace-scoped -- one per namespace that needs it)
+        |
+        v
+   Pod spec references it by name -> kubelet presents it to ghcr.io on pull
+```
+
+The credential itself is usually a **personal access token (PAT)** — scoped as
+narrowly as the registry allows (`read:packages` only, nothing that could push
+an image or touch repo contents) — created once and stored as a CI secret, not
+typed by hand into the cluster.
+
+**Why this, and not something fancier?** The alternatives trade one problem
+for another:
+
+| Approach | Pro | Con |
+| --- | --- | --- |
+| PAT-backed `imagePullSecret` (above) | Works on any Kubernetes distribution; reuses an identity you already have (GitHub) | Long-lived — nothing rotates it automatically; leak it and it's valid until someone revokes it |
+| Cloud-native identity (IRSA on EKS, Workload Identity on GKE) | Short-lived, auto-rotated tokens; no secret to store at all | Ties you to one cloud's registry integration — doesn't travel if you change providers |
+| A shared team credential typed into every cluster by hand | Zero setup | No audit trail for who has it, no per-namespace scoping, and rotating it means finding every place it was pasted |
+
+The narrower a pull secret's scope, the smaller the blast radius if it leaks —
+`read:packages` only, one Secret per namespace rather than one shared
+everywhere, are both worth the small extra setup.
+
+This isn't only a Kubernetes-cluster problem — the same private-registry
+credential shows up in a few other places, each with its own tradeoff:
+
+- **CI pulling into another workflow.** If the workflow lives in the *same*
+  org as the registry, most CI systems mint a short-lived, run-scoped token
+  automatically — no secret to manage. Cross-org needs a PAT again.
+- **A developer's laptop** (`docker login`). Convenient for debugging, but the
+  credential ends up base64-stored in a local config file — not meaningfully
+  more protected than a committed plaintext value, just less obvious.
+- **A second cluster** (disaster recovery, a second region, a different
+  cloud). A registry-agnostic PAT travels with you across clouds in a way a
+  cloud-native identity doesn't — but you re-do the "create the Secret here
+  too" step for every cluster unless something automates it for you.
+
+> **Say it in one line:** `imagePullSecrets` is how a Pod authenticates to a
+> private registry — scope the credential as narrowly as the registry allows,
+> because nothing about a plain PAT expires on its own.
 
 ## The network starts wide open
 
