@@ -570,6 +570,40 @@ intent, the second is the only one a browser ever receives, and a routing rule
 with an opinion of its own silently overrides the general one instead of adding
 to it.
 
+**The admin dashboard's own login had never once worked, and its 404 looked exactly
+like the one it was supposed to give strangers.** The gate re-checks the caller on
+every request by reading their account row back out of Postgres, scanning the
+nullable `email` column into a plain Go string. Every admin account is Telegram-only —
+no email, ever, since that sign-in method was retired — so the column is always
+`NULL` for exactly the accounts this gate exists to admit. The database driver
+refuses that scan outright rather than return an empty string, the query itself
+errors, and the gate reads "query failed" as "not logged in" — the identical `404` a
+stranger gets, for a reason that had nothing to do with who was allowed in.
+
+```
+   admin, signed in over Telegram, clicks the dashboard link
+                    |
+                    v
+   gate re-resolves the session: SELECT ... email ... WHERE id = $1
+                    |
+                    v
+   email is NULL for this account (always is, for any Telegram-only admin)
+                    |
+                    v
+   driver refuses to scan NULL into a bare string -- the query ERRORS
+                    |
+                    v
+   error looks, to the gate, exactly like "no session" -> 404
+   -- the SAME 404 a stranger gets, so nothing about it looked wrong
+```
+
+Found by doing the one thing code review can't: running the built container against a
+real, migrated Postgres and actually signing in as a Telegram-only account, rather
+than reading the query and trusting it. The regression test it shipped with covers
+both account shapes; the one it replaced only ever exercised the email path, which is
+exactly how a query that fails for every real admin passed review and CI without
+either raising a flag.
+
 > **Say it in one line:** the failures worth writing down are the ones where
 > everything looked green.
 
@@ -669,19 +703,34 @@ Stating this is part of the engineering, not an apology for it.
   consumption and account resolution are atomic, but the session insert that follows is
   not, so a failure there burns a link for good. Small window, small blast radius, and
   an unambiguous fix — move the insert inside the transaction — that hasn't been made.
-- **The toolbox's meme generator growing a server dependency — merged, not deployed.**
-  It's currently a fully client-side tool (a video file in, a captioned GIF out). A
-  merged change reworks the input side to accept a YouTube link instead, fetched
-  through a new endpoint on the game server (reusing its existing `yt-dlp`-backed
-  downloader) rather than a browser fetch — YouTube's stream can't be read directly
-  client-side. That's a real exception to "every tool here runs entirely client-side,"
-  worth being precise about. It's on `main` now, but the endpoint is opt-in behind an
-  env var that's off in every overlay, so it has never run in the deployed image and
-  has never been exercised against a real download in this environment's network — code
-  review is not a load test. A mislabeled-`Content-Type` bug was caught reviewing it —
-  the production base image doesn't ship the OS files a stdlib MIME lookup silently
-  depends on — which is a smaller, earlier win than the bugs above: found before
-  anything shipped, not surfaced by a real deployment.
+- **The toolbox's meme generator grew a server dependency — and it's live, not just
+  merged.** It used to be a fully client-side tool (a video file in, a captioned GIF
+  out). It now also accepts a YouTube link, fetched through a new endpoint on the game
+  server (reusing its existing `yt-dlp`-backed downloader) rather than a browser
+  fetch — YouTube's stream can't be read directly client-side. That's a real exception
+  to "every tool here runs entirely client-side," worth being precise about, and the
+  earlier claim that it stayed off in every overlay was wrong the moment it was
+  written: the same change that added the endpoint also turned it on in prod.
+  Confirmed live, without triggering an actual download: a CORS preflight against the
+  real endpoint returns `204`, and posting a malformed URL returns the real handler's
+  `400` and validation message, not a generic gateway error — so the deployed code path
+  is genuinely reachable and doing real work, not dead behind an unset flag. Still not
+  exercised: a real YouTube video succeeding end to end through the browser, which the
+  PR's own test plan flagged as unverified in the sandbox it was built in — that one
+  stays open deliberately, since running it for real is an action with a footprint, not
+  a read. A mislabeled-`Content-Type` bug was caught reviewing it first — the
+  production base image doesn't ship the OS files a stdlib MIME lookup silently depends
+  on — which is a smaller, earlier win than the bugs above: found before anything
+  shipped, not surfaced by a real deployment.
+- **The standalone admin dashboard exists on the cluster and has never served a
+  request.** Splitting it into its own service, `admin-server`, is merged and its
+  Deployment is applied — but the image-pull credential it needs was never actually
+  provisioned (the repository secret behind it is unset), so both its pods sit in
+  `ImagePullBackOff`. With no image running, there is nothing to route real traffic
+  to, so the last step — deleting the old dashboard's Ingress rule and pointing the
+  hostname at the new service — hasn't started either. See [the architecture
+  doc](architecture.md#the-second-copy-exists-and-nobody-has-met-it-yet) for the full
+  chain and what's confirmed live at each link.
 
 > **Say it in one line:** an untested backup, an unfired alert, and an unrun load
 > test are three hypotheses — and calling them anything else is how outages get

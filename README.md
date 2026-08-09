@@ -151,9 +151,9 @@ A portfolio that only lists wins is a portfolio you can't trust. This is the rea
 
 | | Capability | Status |
 | --- | --- | --- |
-| 🟢 | IaC, CI/CD with scan + rollout gates, ingress + auto-renewing TLS, operator-run Postgres, WAL archiving, three-pillar observability, an external synthetic monitor, SLO rules and routing, pod autoscaling, graceful drain, image signing + SBOM (the game's two images), Pod Security Standards at `baseline`, an admin dashboard on its own host and certificate, gated by the existing login | **Live** |
+| 🟢 | IaC, CI/CD with scan + rollout gates, ingress + auto-renewing TLS, operator-run Postgres, WAL archiving, three-pillar observability, an external synthetic monitor, SLO rules and routing, pod autoscaling, graceful drain, image signing + SBOM (the game's two images), Pod Security Standards at `baseline`, an admin dashboard on its own host and certificate, gated by the existing login, a `/report` command feeding a moderation queue on that same dashboard | **Live** |
 | 🟡 | GitOps with a metric-gated canary, default-deny network policies, the node autoscaler | **Authored and validated, deliberately off.** A canary needs a second pod the one baseline node can't fit; unenforced network policies would read as protection they don't provide. |
-| 🔴 | A rehearsed database restore, an alert that actually reached a human, the load test that right-sizes the autoscaler | **Not yet proven.** Backups are verified to write objects but no restore has been performed. A chat-bot alert receiver is authored, but it activates only when both its token *and* its chat id are configured — the chat id is unset, so alerts still land on the receiver that notifies nobody. The k6 test is written; the autoscaler's CPU target is still a committed placeholder. |
+| 🔴 | A rehearsed database restore, an alert that actually reached a human, the load test that right-sizes the autoscaler, the standalone `admin-server` split | **Not yet proven — and not always by choice.** Backups are verified to write objects but no restore has been performed. A chat-bot alert receiver is authored, but it activates only when both its token *and* its chat id are configured — the chat id is unset, so alerts still land on the receiver that notifies nobody. The k6 test is written; the autoscaler's CPU target is still a committed placeholder. The `admin-server` split is deployed but blocked on a repository secret nobody has set yet, so it has never pulled its own image or served a request — this one isn't a deliberate pause, just an unfinished chain. |
 
 > **Say it in one line:** built, staged, and unproven are three different words, and using them precisely is the whole discipline.
 
@@ -162,7 +162,7 @@ A portfolio that only lists wins is a portfolio you can't trust. This is the rea
 | Product | What it is | Stack |
 | --- | --- | --- |
 | 🃏 **Multiplayer card game** | Real-time [Big Two](https://en.wikipedia.org/wiki/Big_two) — a pure rules engine, a WebSocket server with matchmaking and bot fill-in, a browser table UI. Two passwordless login paths, table chat with speech-to-text dictation, a bilingual interface, and a speech-synthesis dealer that calls each play aloud. Practice scoring only, no wagering. | Go · React · TypeScript |
-| 🧰 **Developer utilities toolbox** | Ten browser-only tools: JSON/YAML tree editor, Base64/URL/JWT, regex tester, hash & UUID, timestamp & cron, QR codes, a WYSIWYG Markdown editor, a thumbnail grabber, an image converter, a meme/GIF generator. Every one runs entirely client-side — nothing uploaded. | React · TypeScript |
+| 🧰 **Developer utilities toolbox** | Ten browser-only tools: JSON/YAML tree editor, Base64/URL/JWT, regex tester, hash & UUID, timestamp & cron, QR codes, a WYSIWYG Markdown editor, a thumbnail grabber, an image converter, a meme/GIF generator. Nine run entirely client-side, nothing uploaded; the meme generator's YouTube input is the one deliberate exception — a link, not a file, goes to a server endpoint that fetches the video. | React · TypeScript |
 
 <div align="center">
 
@@ -279,6 +279,7 @@ The operator dashboard behind it doesn't get its own auth: it reuses the same on
 - **🧠 A pillar that was "installed" for eight days had never once stayed up.** Tempo was `OOMKilled` on a 512Mi memory limit — **2,251 restarts** before anyone looked. Its own logs were no help: it started cleanly every time, brought up every module, opened every receiver, and was then killed by the kubelet, so nothing in them said *out of memory*; only `lastState.terminated.reason` did. The install had reported success, so the traces pillar read as done for its entire life. Then the fix wouldn't land either: **a StatefulSet's rolling update will not replace a pod that is already unhealthy**, so raising the limit changed nothing a pod that was never recreated could act on — `helm --wait` sat there and timed out while the restart count climbed on the same eight-day-old pod. Deleting it was the fix. Two lessons, one bug: *installed is not running*, and *a crashlooping StatefulSet has to be pushed, not patched*.
 - **🧵 A flaky test where both outcomes were correct.** A test asserted the server drops an oversized frame — but the client's write and the server's close are two ends of one socket racing. Either side can win, and *both* prove the cap held. The test was accepting one of two correct answers.
 - **🔑 A Secret with two writers erased half of itself.** One install workflow rewrote the game bot's credential with `kubectl create --dry-run | apply` — which *replaces* an object, not merges it — silently deleting the two keys a *different* workflow had set. Every bot feature behind it (admin commands, inline mode, the chat archive) died together, for days, with no error a health check would ever see: the server was correctly running, just correctly configured wrong. Fixed by reading the live keys back before overwriting them — and by grep-auditing every other Secret in the repo for the same two-writer shape.
+- **🚪 The admin dashboard's own login had never once worked.** Its gate re-checks every request by scanning the account's nullable `email` column into a plain string — and every real admin is Telegram-only, so that column is always `NULL` for exactly the accounts meant to get in. The driver refused the scan, the query errored, and the gate read that as "not logged in" — the identical `404` a stranger gets, so nothing about it looked broken from outside. Found by actually signing in against a real database, not by reading the query. Fixed and deployed the same day.
 
 ## How "done" was verified — and what isn't
 
@@ -295,7 +296,8 @@ And what is deliberately *not* claimed:
 - ❌ no restore has ever been performed from those backups
 - ❌ no alert has ever been delivered to a human in anger
 - ❌ the load test that would right-size the autoscaler has not been run
-- ❌ "the admin dashboard correctly refuses a stranger" and "an admin has signed in and used it" are different claims, and only the first one is checked off here
+- ❌ "the admin dashboard correctly refuses a stranger" and "an admin has signed in and used it" are different claims, and only the first one is checked off here — a real bug that broke the second one for every admin is fixed now, but the fix itself hasn't been exercised by an actual admin on the actual domain, only against a real database directly
+- ❌ the dashboard's move to its own service is deployed but has never pulled its own container image, so the standalone copy has never served a single real request — the one people actually reach is still the original, embedded one
 
 *A played hand beats a green check — and an unrehearsed restore is a hypothesis, not a backup.*
 

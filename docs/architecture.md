@@ -1006,6 +1006,111 @@ section above, applied to a second host instead of a second issuer.
 > **Say it in one line:** the safest new door is the one you don't build — reuse the
 > login you already trust, and add the one check that's actually new.
 
+### A gate that had never once said yes
+
+The dashboard's gate re-resolves the caller on every request by reading the account
+row back out of Postgres — `ResolveSession`, and before the code below split it into
+its own module, a near-identical `ResolveLoginSession`. Both scanned the row's
+nullable `email` column straight into a plain Go `string`. That is exactly the wrong
+type for the one account shape the gate exists to check: an admin, signed in over
+Telegram, with no email address at all, because email sign-in was already
+[retired](#retiring-a-door-properly). pgx refuses to scan `NULL` into a bare string
+rather than silently producing an empty one — correct behavior for a driver, and a
+query that errors out for every admin who ever tried this door.
+
+```
+   an admin signs in over Telegram -- no email on the account, ever
+                    |
+                    v
+   the gate calls ResolveSession to re-check who's asking, on THIS request
+                    |
+                    v
+   SELECT ... email ... FROM accounts WHERE id = $1     -- email is NULL
+                    |
+                    v
+   pgx: cannot scan NULL into *string -- the query itself returns an error
+                    |
+                    v
+   ResolveSession has nothing usable -> the gate reads this as "not logged
+   in" -> 404, the SAME response a stranger gets
+```
+
+The dashboard had been live since [the day this door opened](#the-same-door-gating-a-very-different-room),
+which means every real admin who tried it in that window would have hit the identical
+404 a stranger gets — for a reason with nothing to do with the allow-list. This is
+precisely the gap named when the dashboard first shipped: the gate's *refusal* was
+verified end to end, an admin's actual *use* of it was not. Checking the second half
+is what found the bug — running the built container against a real, migrated
+Postgres and signing in as a Telegram-only account, not reading the query and
+assuming it was fine. The regression test added alongside the fix covers both account
+shapes; the one it replaced only ever exercised the email path, which is exactly how
+this shipped unnoticed.
+
+Because the same query existed in two places — the shared module being carved out for
+the standalone service below, and the original code it was copied from, still what
+actually answers [the dashboard host](#the-same-door-gating-a-very-different-room)
+today — both got fixed on the same pass, and the fix reached production that same day.
+
+**What's confirmed, and what still isn't.** Confirmed: the fix is correct against a
+real database, and it is the code behind the dashboard people actually reach right
+now. Not confirmed: an actual admin, on the actual domain, clicking an actual link
+since the fix landed — the same honest gap this document draws everywhere else, just
+narrower than it used to be.
+
+> **Say it in one line:** a gate that refuses everyone equally can still be broken for
+> a reason that has nothing to do with who's allowed in — the only way to find that is
+> to actually walk through it.
+
+### The second copy exists, and nobody has met it yet
+
+Moving the dashboard into its own service, `admin-server`, is a chain of separate
+changes, not one switch — and as of this writing, only two links in that chain have
+actually taken effect where it counts: on the live cluster.
+
+```
+   stand up admin-server, its own namespace, its own Deployment   -- MERGED, LIVE
+   give it a real credential to pull its (private) image          -- MERGED, code only
+   narrow the IAM/network surface around it                       -- MERGED, code only
+   fix a Secret-type collision the DB-role rollout hit live        -- MERGED, LIVE
+   cut real traffic to it, retire the old embedded copy            -- NOT STARTED
+```
+
+The pull-credential step does exactly what it says — a `ghcr-pull` Secret mirrored
+into every product namespace, `admin` included — and it now fails loudly on purpose
+if the token behind it is missing, rather than the silent no-op an earlier version of
+this same pattern would have produced elsewhere in this repo. It's missing: no
+repository secret has ever been set for it, so every run that would create it exits
+with an explicit error instead of a Secret. Confirmed live: `admin` has no
+`ghcr-pull` Secret at all, and both `admin-server` pods sit in `ImagePullBackOff`,
+retrying a pull the kubelet has no credential for — one of them over a full day old.
+
+The IAM narrowing (the two policies' `manage cluster-family` down to the specific
+`use clusters` verb Oracle's own reference confirms is sufficient) is authored and
+validated offline, and confirmed live to match *nothing* that's actually applied: the
+policies still grant the broader verb, because applying the change needs the
+Terraform backend's own credentials, and nobody has run `apply` against the real
+tenancy since the commit landed.
+
+The one link that *has* closed did so by surfacing a second real bug in the same
+rollout that added the [DB-role narrowing below](#a-cookie-proves-who-it-doesnt-prove-why):
+rebuilding `admin-db-app` as a plain generic credential 400'd forever against a Secret
+that already existed with a different, immutable `type`. Confirmed live, the same
+day: a delete-before-create fix landed, the role and its narrower grants applied
+cleanly, and `admin-server`'s database connections now show up under `admin_server`
+rather than the broader role it used to share.
+
+Net effect: the standalone copy has never once pulled its own image, so it has never
+served a single real request, and the last step — removing the old
+`the dashboard host` rule from `big2`'s own Ingress — has nothing to cut over
+*to* yet. Confirmed live: no Ingress object exists in the `admin` namespace at all.
+The dashboard everyone actually reaches today is still the one embedded in
+`big2-server` — the same copy [the gate fix above](#a-gate-that-had-never-once-said-yes)
+landed in.
+
+> **Say it in one line:** a migration is a chain of separate "merged"s, and only the
+> links applied against the real cluster are load-bearing — the rest are still just
+> code waiting for someone to run it.
+
 ### A cookie proves who; it doesn't prove why
 
 The allow-list check above answers "is this person an admin?" It doesn't answer a
@@ -1046,7 +1151,7 @@ second random value compared against itself, the same trust model the login sess
 itself already uses.
 
 **The honest part of this story is which copy got fixed.** The dashboard's move to its
-own standalone service ([above](#the-same-argument-applied-a-third-time)) stands the
+own [standalone service](#the-second-copy-exists-and-nobody-has-met-it-yet) stands the
 new copy up *before* cutting real traffic to it, on purpose — so nothing breaks for
 players mid-migration. That means, for a while, **two** copies of the same dashboard
 code exist: a new one that isn't live yet, and an old one, still embedded in the game
@@ -1064,6 +1169,16 @@ password-managed declaratively by the database operator rather than sharing the 
 server's own full read-write-migrate role. The database can't tell "the dashboard" and
 "the game server" apart by network path alone — only by which credential shows up at
 the connection — so the credential itself has to be the boundary.
+
+**That rollout wasn't clean on the first try.** The very first attempt to apply it
+against the live cluster 400'd forever: `Secret.type` is immutable in Kubernetes, and
+the step this one replaced had already produced `admin-db-app` as a
+`kubernetes.io/basic-auth` Secret, not the plain `Opaque` type the new build step
+assumes. No outage — the rejection lands before the line that restarts the dashboard
+even runs — but `admin-server` kept running on its old, broader, mirrored credential
+until a delete-before-create fix landed. Confirmed live, the same day: the role and
+its narrower grants applied cleanly, and `admin-server`'s connections now show up
+under `admin_server` in Postgres, not the role it used to share.
 
 > **Say it in one line:** a session cookie proves *who's* asking, not *why* — a
 > state-changing action needs something a forged request structurally cannot produce,
@@ -1106,6 +1221,68 @@ perfectly, forever.
 > **Say it in one line:** the safest way to avoid validating a redirect target is to
 > never accept one — fix the destination in the code that runs, not in anything that
 > arrives with the request.
+
+### A queue that needs nothing it doesn't already have
+
+Every dashboard page up to this point *observes*: list the players, open a wallet,
+revoke a session. None of them give an operator anything to do about a bad message in
+chat — and the dashboard has no visibility into chat at all. Closing that gap needed a
+way to flag a message, and a place to review what got flagged.
+
+The flagging mechanism is deliberately the dumbest thing that works: a player replies
+to the offending message and sends `/report`. No keyword filter, no automated
+scoring — a human decides, the same way a moderator would in any chat app.
+
+```
+   a player sees a bad message, replies to it, sends: /report
+        |
+        v
+   Telegram inlines the ENTIRE original message on the reply -- sender,
+   text, timestamp -- no archive, no lookup, no database needed to know
+   which message is meant or what it said
+        |
+        v
+   filed as one row: reporter, reported sender, a text snapshot captured
+   AT THIS INSTANT -- so it survives the original message being edited
+   or deleted a minute later
+        |
+        v
+   the SAME admin dashboard -- same door, same allow-list, same CSRF --
+   gets one more page: an open queue, newest first, two actions per row
+```
+
+**Why a reply instead of a lookup.** The tempting design resolves "which message?"
+by searching a chat archive for something matching what the reporter describes. That
+would make `/report` depend on archiving being turned on at all — and archiving is a
+materially bigger privacy step than logging in, opt-in on purpose (see [running it
+with nothing configured](#running-it-with-nothing-configured)'s theme, applied to a
+second dependency). Reading the reply Telegram already sent needs none of that: the
+command works identically whether or not this chat is ever archived.
+
+**The second half is deliberately staged, not stubbed out silently.** A moderator
+reviewing a report often wants more than the one flagged line — the sender's other
+recent messages, for context. That needs a real chat archive (Kafka into Cassandra),
+which is a separate, larger piece of work, still being built, not yet merged. Rather
+than block the queue on it, the two are joined by one interface:
+
+```
+   what /report needs               what a moderator reviewing a report could use
+   -------------------               ---------------------------------------------
+   the reply, right now              the sender's other recent messages, and the
+   -- that's ALL, and it's           original text even after an edit -- a SEPARATE
+   already live                      system, still mid-build, not on this branch
+
+   the two sides talk through one interface, nil until that second system lands --
+   so the queue is fully usable today on the snapshot alone, and picks up richer
+   context later with no change to how a report is filed or reviewed
+```
+
+Same shape as [the state file still living on one machine](#the-honest-gap-where-that-state-file-lives):
+authored against an interface, wired to nothing yet, and named as such rather than
+left to look finished.
+
+> **Say it in one line:** a report needs nothing but what Telegram already handed over
+> on the reply — richer context is a nil interface away, not a blocking dependency.
 
 ## Playing with the people you came with
 
@@ -2469,47 +2646,55 @@ The whole document, compressed. If you remember nothing else, remember these.
    the page it ends on still tells the truth.
 10. A grouping key should be a preference with fallbacks, not a partition — because
     never seating anyone is worse than seating them with strangers.
-11. A session cookie proves *who's* asking, not *why* — a state-changing action needs
+11. A gate that refuses everyone equally can still be broken for a reason that has
+    nothing to do with who's allowed in — the only way to find that is to actually
+    walk through it.
+12. A migration is a chain of separate "merged"s, and only the links applied against
+    the real cluster are load-bearing — the rest are still just code waiting for
+    someone to run it.
+13. A session cookie proves *who's* asking, not *why* — a state-changing action needs
     something a forged request structurally cannot produce, and a service
     mid-migration is only as safe as whichever copy is actually live.
-12. The safest way to avoid validating a redirect target is to never accept one — fix
+14. The safest way to avoid validating a redirect target is to never accept one — fix
     the destination in the code that runs, not in anything that arrives with the
     request.
+15. A report needs nothing but what Telegram already handed over on the reply —
+    richer context is a nil interface away, not a blocking dependency.
 
 **The game itself**
 
-13. The strongest anti-cheat is data the client never received — so send each seat only
+16. The strongest anti-cheat is data the client never received — so send each seat only
     its own hand, and re-validate every move anyway.
-14. Derive the server URL from the page's own origin and one built image runs anywhere
+17. Derive the server URL from the page's own origin and one built image runs anywhere
     — and a best-effort feature that degrades to silence never needs an error path.
 
 **Keeping it up**
 
-15. Rehearse on staging, because production rate limits are per-domain, per-week, and
+18. Rehearse on staging, because production rate limits are per-domain, per-week, and
     there's no appeal.
-16. A snapshot restores to one instant and the log restores to any instant — but an
+19. A snapshot restores to one instant and the log restores to any instant — but an
     untested backup is still only a hypothesis.
-17. Staying up beats staying consistent-or-dead — when the failure is recoverable at
+20. Staying up beats staying consistent-or-dead — when the failure is recoverable at
     human speed and the alternative is a permanent crash loop.
-18. A pod autoscaler reshuffles capacity and only nodes create it — so the `max` on the
+21. A pod autoscaler reshuffles capacity and only nodes create it — so the `max` on the
     node pool is the real cost control.
 
 **Knowing what it's doing**
 
-19. Monitoring that shares a failure domain with the thing it monitors will go quiet
+22. Monitoring that shares a failure domain with the thing it monitors will go quiet
     exactly when you need it loudest.
-20. Don't alert on errors, alert on how fast they're eating the budget — and make a
+23. Don't alert on errors, alert on how fast they're eating the budget — and make a
     long and a short window agree first.
-21. A fake agrees with your assumptions and a real socket doesn't — so test every
+24. A fake agrees with your assumptions and a real socket doesn't — so test every
     boundary against the real thing, and draw the gaps you haven't covered.
 
 **Getting changes out**
 
-22. GitOps is a source-of-truth move and a canary is a safety move — so when "it's
+25. GitOps is a source-of-truth move and a canary is a safety move — so when "it's
     blocked on capacity" comes up, check which *half* is blocked.
-23. Sign the digest, declare what the image already is, and never apply a default-deny
+26. Sign the digest, declare what the image already is, and never apply a default-deny
     you can't test.
-24. An inconvenience became a forcing function — everything runs through pipelines,
+27. An inconvenience became a forcing function — everything runs through pipelines,
     which is how a team would have done it anyway.
 
 ---
