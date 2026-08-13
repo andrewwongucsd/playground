@@ -6,18 +6,18 @@
 
 A case study, not a codebase. This repo documents the architecture, the decisions, and the production bugs worked through to get two products live on a managed cloud cluster.
 
-**Everything described here is running:**
-[the toolbox](#) ·
-[the card game](#) ·
-[a scheduler that kills its own workers](#)
+**Everything described here is running:** a browser-side utilities toolbox, a
+multiplayer card game, and a scheduler that kills its own workers — all live on the
+cluster described below, behind real TLS, continuously backed up.
 
-<sub>The application source is in a private repo. What is public is this write-up
-and the running system it describes — read the write-up for the reasoning, open
-the links to check that it is real.</sub>
+<sub>The application source and the live hostnames are both private. What is public
+is this write-up: the architecture, the decisions, and the production bugs worked
+through to get there. The recording below is a real session against the running
+deployment.</sub>
 
 <br>
 
-<img src="docs/assets/big2-demo.gif" alt="A recorded session of the live game: entering a nickname, taking a seat, the table filling with bots, then playing a hand — cards leaving the hand as each trick resolves" width="300">
+<img src="docs/assets/game-demo.gif" alt="A recorded session of the live game: entering a nickname, taking a seat, the table filling with bots, then playing a hand — cards leaving the hand as each trick resolves" width="300">
 
 <sub><i>A real session against the live deployment — take a seat, bots fill the table, play a hand.<br>Recorded 2026-08-03; trimmed and sped up, not staged.</i></sub>
 
@@ -280,6 +280,8 @@ The operator dashboard behind it doesn't get its own auth: it reuses the same on
 - **🧵 A flaky test where both outcomes were correct.** A test asserted the server drops an oversized frame — but the client's write and the server's close are two ends of one socket racing. Either side can win, and *both* prove the cap held. The test was accepting one of two correct answers.
 - **🔑 A Secret with two writers erased half of itself.** One install workflow rewrote the game bot's credential with `kubectl create --dry-run | apply` — which *replaces* an object, not merges it — silently deleting the two keys a *different* workflow had set. Every bot feature behind it (admin commands, inline mode, the chat archive) died together, for days, with no error a health check would ever see: the server was correctly running, just correctly configured wrong. Fixed by reading the live keys back before overwriting them — and by grep-auditing every other Secret in the repo for the same two-writer shape.
 - **🚪 The admin dashboard's own login had never once worked.** Its gate re-checks every request by scanning the account's nullable `email` column into a plain string — and every real admin is Telegram-only, so that column is always `NULL` for exactly the accounts meant to get in. The driver refused the scan, the query errored, and the gate read that as "not logged in" — the identical `404` a stranger gets, so nothing about it looked broken from outside. Found by actually signing in against a real database, not by reading the query. Fixed and deployed the same day.
+
+- **🔐 Installing the fix is what caused the outage.** A revoked registry pull token took the public site to `503` — and revealed that the one service with a *private* image had been dead in `ImagePullBackOff` for **three days and twenty-three hours**, unseen. The root cause wasn't the token: one change made every deployment *depend* on a Secret that a hand-dispatched workflow *creates*, so the dependency shipped and its prerequisite didn't. And the two states aren't equivalent — a **missing** pull credential falls back to an anonymous pull (so every public image kept serving), while a **present but invalid** one fails closed. The site was healthy *because* no credential existed; dispatching the repair is what broke it. Found by testing the service nobody had reported. The alert written to catch it next time nearly shipped permanently silent — its query compared inside an aggregation and could never match — caught only by breaking a pod on purpose to watch it fire.
 
 ## How "done" was verified — and what isn't
 

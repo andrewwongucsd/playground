@@ -273,7 +273,7 @@ update and is actually a **replacement**:
 The install job runs for reasons that have nothing to do with Telegram — it installs
 the whole platform. Any time it happened to run *after* the activation job had set the
 fuller Secret, it silently deleted the other two keys. And the failure that produces is
-uniquely hard to catch: `big2-server` stayed up, correctly configured *not* to serve
+uniquely hard to catch: the game server stayed up, correctly configured *not* to serve
 `/telegram/webhook` at all without a secret — which is the right behavior for a
 genuinely unconfigured deployment, and indistinguishable from one. No crash, no 5xx, no
 failed health check. Every bot feature behind that route — admin commands, inline mode,
@@ -481,7 +481,7 @@ Three things made it invisible, and each is worth naming separately:
 
 The repair was to stop waiting on a deadlock: apply the values, delete the stuck pod so
 it comes back on the new template, then gate on `rollout status`. It came up healthy on
-the first try, and Tempo's API now answers with `big2-server` as a service that has sent
+the first try, and Tempo's API now lists the game server as a service that has sent
 it traces — which is the check that should have been run on day one.
 
 What it cost to find was one question nobody had asked in eight days — *is the pod
@@ -604,6 +604,62 @@ both account shapes; the one it replaced only ever exercised the email path, whi
 exactly how a query that fails for every real admin passed review and CI without
 either raising a flag.
 
+**Installing the fix is what caused the outage.** A registry pull credential — a
+token scoped to `read:packages`, nothing else — was revoked. The public site went to
+503 with no running game-server pod. That part is ordinary. Three things about it
+were not.
+
+*The revoked token was the trigger, not the cause.* One change had added
+`imagePullSecrets` to **every** service's deployment — which ships automatically on
+the next push — while the step that *creates* that Secret lives in a workflow a human
+dispatches by hand. The dependency went live; its prerequisite did not, for four
+days.
+
+*Missing and broken are different failures, and only one of them degrades.*
+
+```
+   MISSING credential                  INVALID credential
+   -----------------                   ------------------
+   falls back to an ANONYMOUS pull     authenticates, gets 403, STOPS
+   public image  -> works              public image  -> FAILS
+   private image -> fails              private image -> fails
+```
+
+So for four days only the one service with a *private* image was broken — the
+dashboard, sitting in `ImagePullBackOff`, invisible. Every public image kept pulling
+anonymously and serving fine. Then dispatching the workflow to repair the dashboard
+wrote the Secret from the dead token, and a *present but invalid* credential fails
+closed. The public site had been healthy precisely **because** no credential existed.
+Running the repair took it down.
+
+*It was found by testing the service everyone believed was healthy.* Three plausible
+theories burned time first — a missing namespace, node capacity, a permissions
+problem on the newest service — and all three shared a shape: they examined the thing
+that had just changed. What broke it open was checking the credential against a
+service nobody had reported. It had been failing for **three days and twenty-three
+hours**.
+
+The gap that let it run that long is the real finding. Every alert in place measured
+a service that *was serving* — burn rates need failing requests, target-down needs a
+target that was once scraped, the external probe only watches hostnames it was given.
+**A pod that never starts produces none of those.** The fix was an alert on pods
+stuck not-Ready, cluster-wide rather than scoped to one service, because the point is
+catching the service nobody is currently looking at.
+
+And that alert nearly shipped useless. Pointed at a deliberately unpullable pod to
+test it, the first version returned nothing: it compared `== 0` *inside* an
+aggregation and then tested the result for `1`, which can never match. It would have
+looked exactly like coverage while alerting on nothing — the same class of green-that-
+lies as every other bug in this section, this time in the thing built to catch them.
+
+The durable lesson is narrower than "rotate your credentials." Every other secret
+reference in these manifests is marked optional, so a missing one disables a feature
+instead of stopping a pod. `imagePullSecrets` is the single reference type Kubernetes
+offers no such escape hatch for — and that is exactly where this broke. **Where the
+platform won't let you degrade gracefully, don't create the dependency at all:** the
+services with public images no longer reference the credential, so a dead token
+cannot reach them.
+
 > **Say it in one line:** the failures worth writing down are the ones where
 > everything looked green.
 
@@ -723,7 +779,7 @@ Stating this is part of the engineering, not an apology for it.
   on — which is a smaller, earlier win than the bugs above: found before anything
   shipped, not surfaced by a real deployment.
 - **The standalone admin dashboard exists on the cluster and has never served a
-  request.** Splitting it into its own service, `admin-server`, is merged and its
+  request.** Splitting it into its own service is merged and its
   Deployment is applied — but the image-pull credential it needs was never actually
   provisioned (the repository secret behind it is unset), so both its pods sit in
   `ImagePullBackOff`. With no image running, there is nothing to route real traffic
